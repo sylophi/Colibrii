@@ -283,8 +283,9 @@ hostname routes, `up` once it does, and `error` until the next start.
 Only while it is `up` does the device offer the tunnel to a peer.
 The runner provisions the tunnel through the service, starts it again
 on a ladder after it fails, checks it again when the machine wakes or
-a peer never arrives through it, and ends its `cloudflared` when the
-device's scope closes. It keeps the process id, when that process
+a peer never arrives through it, looks for a `cloudflared` again when
+the machine wakes while it has none, and ends its `cloudflared` when
+the device's scope closes. It keeps the process id, when that process
 started, and `cloudflared`'s log (`cloudflared.log`) in the directory,
 and ends a `cloudflared` a crashed run left behind at its next start,
 only while that id still names the process it started. A
