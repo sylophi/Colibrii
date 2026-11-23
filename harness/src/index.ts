@@ -1,12 +1,13 @@
 // The real Worker in workerd, through wrangler's test harness, with two
-// apps whose Clerk key pairs are made here for each run. The service's
-// tests and the SDK's share it.
+// apps in its database whose Clerk key pairs are made here for each run.
+// The service's tests and the SDK's share it.
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { signJwt } from "@clerk/backend/jwt";
 import { afterAll, expect } from "vitest";
 import { createTestHarness } from "wrangler";
+import { decodeApp, putAppSql, removeAppSql } from "../../service/src/apps.ts";
 
 const serviceDir = join(import.meta.dirname, "../../service");
 
@@ -84,15 +85,15 @@ globalThis.fetch = async (input, init) => {
   );
 };
 
-// It serves `served` in place of the two apps, to test the instance's
-// own checks. `close` stops it.
-export const serve = async (served: ReadonlyArray<object> = apps) => {
+// `putApp` adds an app, or replaces the one under its id, and
+// `removeApp` removes one, with the statements scripts/app.ts runs and
+// without its checks. `close` stops it.
+export const serve = async () => {
   const server = createTestHarness({
     root: serviceDir,
     workers: [
       {
         configPath: "./wrangler.jsonc",
-        vars: { APPS: served },
         secrets: {
           TICKET_SIGNING_KEY: "local-only",
           CLOUDFLARE_API_TOKEN: "local-only",
@@ -104,13 +105,27 @@ export const serve = async (served: ReadonlyArray<object> = apps) => {
   const { url } = await server.listen();
   const worker = server.getWorker();
   await worker.applyD1Migrations("DB");
-  return { url: url.href, worker, close: () => server.close() };
+  const { DB } = await worker.getEnv();
+  const putApp = async (app: object) => {
+    await DB.prepare(putAppSql(decodeApp(app))).run();
+  };
+  const removeApp = async (id: string) => {
+    await DB.prepare(removeAppSql(id)).run();
+  };
+  for (const app of apps) await putApp(app);
+  return {
+    url: url.href,
+    worker,
+    putApp,
+    removeApp,
+    close: () => server.close(),
+  };
 };
 
 // The service for a vitest file, stopped once its tests are done, which
 // then fail if any request left the machine.
-export const startService = async (served: ReadonlyArray<object> = apps) => {
-  const service = await serve(served);
+export const startService = async () => {
+  const service = await serve();
   afterAll(async () => {
     await service.close();
     expect(unexpectedRequests).toEqual([]);

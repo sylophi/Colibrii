@@ -10,8 +10,9 @@ export interface Env {
   // before a device credential is checked.
   readonly RATE_LIMIT: RateLimit;
   readonly RATE_LIMIT_OPEN: RateLimit;
-  // The rest is checked as the Worker starts (config.ts). An app's
-  // Clerk secret key is a secret under the name its config gives.
+  // The rest is checked as the Worker starts (config.ts), but for each
+  // app's Clerk secret key, a secret under the name its row gives, read
+  // when a request needs it.
   readonly [name: string]: unknown;
 }
 

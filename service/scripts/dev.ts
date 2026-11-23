@@ -1,8 +1,9 @@
 // Serves the Worker at http://localhost:8787 from wrangler.jsonc, with
 // one app, inkwell, whose Clerk key pair this makes in .local/ on its
 // first run. Login tokens signed with .local/clerk.key.pem sign in.
+import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { unstable_startWorker } from "wrangler";
 
@@ -23,20 +24,28 @@ if (!existsSync(publicKeyFile)) {
   writeFileSync(publicKeyFile, pair.publicKey);
 }
 
+execFileSync(
+  process.execPath,
+  [
+    join(serviceDir, "scripts/app.ts"),
+    "--local",
+    "add",
+    "inkwell",
+    "--key",
+    publicKeyFile,
+    "--origin",
+    "inkwell://app",
+    "--origin",
+    "http://localhost:5173",
+    "--oauth-client",
+    "local-oauth-client",
+  ],
+  { stdio: "inherit" },
+);
+
 const worker = await unstable_startWorker({
   config: join(serviceDir, "wrangler.jsonc"),
   bindings: {
-    APPS: {
-      type: "json",
-      value: [
-        {
-          id: "inkwell",
-          clerkPublicKey: readFileSync(publicKeyFile, "utf8"),
-          origins: ["inkwell://app", "http://localhost:5173"],
-          oauthClientId: "local-oauth-client",
-        },
-      ],
-    },
     TICKET_SIGNING_KEY: { type: "secret_text", value: "local-only" },
     CLOUDFLARE_API_TOKEN: { type: "secret_text", value: "local-only" },
   },
