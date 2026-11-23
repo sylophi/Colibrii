@@ -1,0 +1,95 @@
+[
+  {
+    "name": "payloads in both handshake messages",
+    "inputs": {
+      "prologue": "Y29saWJyaWkgbm9pc2UgdmVjdG9ycw",
+      "initiatorStaticPrivateKey": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8",
+      "initiatorEphemeralPrivateKey": "MDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk8",
+      "responderStaticPrivateKey": "UFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm8",
+      "responderEphemeralPrivateKey": "cHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaHiImKi4yNjo8",
+      "messages": [
+        {
+          "from": "initiator",
+          "payload": "dGhlIGZpcnN0IGhhbmRzaGFrZSBtZXNzYWdl"
+        },
+        {
+          "from": "responder",
+          "payload": "dGhlIHNlY29uZCBoYW5kc2hha2UgbWVzc2FnZQ"
+        },
+        {
+          "from": "initiator",
+          "payload": "b25l"
+        },
+        {
+          "from": "initiator",
+          "payload": "dHdv"
+        },
+        {
+          "from": "responder",
+          "payload": "dGhyZWU"
+        },
+        {
+          "from": "responder",
+          "payload": ""
+        },
+        {
+          "from": "initiator",
+          "payload": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_w"
+        }
+      ]
+    },
+    "expected": {
+      "initiatorStaticPublicKey": "2J47rXlDfb7Z-ENBgwT0YP8Fx_6B_kqVd6gEy5Nn_2Y",
+      "responderStaticPublicKey": "OS0XSjizsb6vrx_oJIcIQcX6UxvG6v22QCwSRmRIjBw",
+      "handshakeHash": "LcEsgM-AD-zOhnr_TbDUJC5J46ELsyxRzgvAKaDqRLg",
+      "messages": [
+        "NOQtSvXvlKB6OoQgG4idTNGnQ8snsRtqEEOKj-uOWEduI_phmpiYYHWRs2KIZzHBus4cmj1C0OHNLa0L9Q8xUL88Vg7EwvgilYCtaPI0qI0GvqCpSHqS0WO_76SCoJXUAdFYjlSZ-_gRS44sF7yLh7jxCAhYs1Jp_Yz_",
+        "I7e7jJGuAIcR-xKEZ4C83x4GX4Ib3-xJ9X58fc1MSCOSWJf-KTffn8_u-RAPb0x3RvKPTe08Rg-be0ygVNfssxufVxauPRirzIgcsg",
+        "lpLj6CRww-_oZxZB6ShqpUpxxw",
+        "kYiL69UQfQGYwpVUwaWsKcHCFA",
+        "wLja0Xmbjk25iFmB4tIgvLrANfb5",
+        "rQIJ8GE9AkHWI00s3j-imQ",
+        "buUmCWwNZyH6ioiOaH7TOYw5PyV933kdDyX95TECXYqBVDUdmoFSHUn8yjU9vJZT-h0RAgxomed1wvlAbq9AcnXYQ4hLDLL9Hxp7QHSUfYPrvezfzaantDsK_3MMCq3Kw1-mqreWOJjXhUxj-AE5F2T1ek8Um57tPoi4K8XiJ2OP86IdMFt5Bq85Dtecobpju-ZKLZiAn4rM2g0eaBBULnYcwFKv9t-VVpujwj2L6zzsyYwHKAGKSUgknU19jB5LfhiFZv9Yw_y4eha2fkpBzjbSR29Qf6yLztTvtYdQF4Dr--h7G1xu7adFRBxE5jbCh1poxmfW5W3tgF5wV3SKZvpg-TJZI_VgS-jjl9c5SmM"
+      ]
+    }
+  },
+  {
+    "name": "empty payloads and prologue",
+    "inputs": {
+      "prologue": "",
+      "initiatorStaticPrivateKey": "kJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq8",
+      "initiatorEphemeralPrivateKey": "sLGys7S1tre4ubq7vL2-v8DBwsPExcbHyMnKy8zNzs8",
+      "responderStaticPrivateKey": "0NHS09TV1tfY2drb3N3e3-Dh4uPk5ebn6Onq6-zt7u8",
+      "responderEphemeralPrivateKey": "8PHy8_T19vf4-fr7_P3-_wABAgMEBQYHCAkKCwwNDg8",
+      "messages": [
+        {
+          "from": "initiator",
+          "payload": ""
+        },
+        {
+          "from": "responder",
+          "payload": ""
+        },
+        {
+          "from": "responder",
+          "payload": "dGhlIHJlc3BvbmRlciBmaXJzdA"
+        },
+        {
+          "from": "initiator",
+          "payload": "dGhlbiB0aGUgaW5pdGlhdG9y"
+        }
+      ]
+    },
+    "expected": {
+      "initiatorStaticPublicKey": "n9etbc_0KY3T-W1bGyr5EKBTWxSI1_j6uzSamCiAthU",
+      "responderStaticPublicKey": "az7mdGNYPL49wI_p0HZcJmb_UhDdUnydhwXkSSfIDVU",
+      "handshakeHash": "gohpivBsPi10ovYtR7mWL0OjtQ2EEZEIk1JUNv92EM8",
+      "messages": [
+        "Pz5fbYaSbJwSjPhFgVdPloQNmO5atTsew7duK7JblF7JUc5LdcCnO_Mz9zqhF8VWuuezOpoeVs-HwVUindnF3z5N0QF--zAgavC4dcxkNHDaLzlXq7krx81Kcck8J4Fj",
+        "PnPOFignoy_5I3j89PNkZNjPCoETY4aQp3Xytpmr1m5pBqP_B6uUxYI3NKFdTBYD",
+        "Bz-ompKKbQ2e2TywlU4D8Leh6gYg79GZohXngNbkl8vmuM0",
+        "ChBcAkdsnBdso3TmU8u-IflwLz1J4dH6znCI0cMPteQrzw"
+      ]
+    }
+  }
+]

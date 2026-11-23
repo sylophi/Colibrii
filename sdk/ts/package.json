@@ -1,0 +1,63 @@
+{
+  "name": "@colibrii/sdk",
+  "version": "0.1.0",
+  "description": "The device side of Colibrii, which connects a person's devices to each other for any app",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sylophi/Colibrii.git",
+    "directory": "sdk/ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node/index.ts",
+    "./browser": "./src/browser/index.ts",
+    "./wire/*": "./src/wire/*.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./node": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/node/index.js"
+      },
+      "./browser": {
+        "types": "./dist/browser/index.d.ts",
+        "default": "./dist/browser/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "$(effect-tsgo get-exe-path)",
+    "test": "vitest run",
+    "vectors": "node scripts/vectors.ts --write && pnpm -w exec oxfmt spec/vectors"
+  },
+  "dependencies": {
+    "@noble/ciphers": "catalog:",
+    "@noble/curves": "catalog:",
+    "@noble/hashes": "catalog:",
+    "@types/ws": "catalog:",
+    "ws": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@colibrii/harness": "workspace:*",
+    "@effect/tsgo": "catalog:",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "esbuild": "catalog:",
+    "playwright-core": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

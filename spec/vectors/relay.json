@@ -1,0 +1,286 @@
+[
+  {
+    "name": "connectInfo answered with lan and tunnel candidates",
+    "inputs": {
+      "asker": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "asked": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askerStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askerEphemeralPrivateKey": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4A",
+      "askedStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askedEphemeralPrivateKey": "gYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6A",
+      "id": "4096",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsibGFuIiwidHVubmVsIl0sImNvbm5lY3Rpb25JZCI6IjVjMWU5YTdkM2IyZjRlNmE4YzBkMWYzYjVhN2M5ZTJkIn19",
+      "answerPayload": "eyJvayI6dHJ1ZSwicmVzdWx0Ijp7ImF2YWlsYWJsZSI6dHJ1ZSwiY2FuZGlkYXRlcyI6W3sia2luZCI6ImxhbiIsInVybCI6IndzOi8vMTkyLjE2OC4xLjIwOjQxNzM0IiwidGlja2V0IjoiY29saWJyaWlfbHRfQVFJREJBVUdCd2dKQ2dzTURRNFBFQSJ9LHsia2luZCI6ImxhbiIsInVybCI6IndzOi8vWzIwMDE6ZGI4OjoyMF06NDE3MzQiLCJ0aWNrZXQiOiJjb2xpYnJpaV9sdF9FUklURkJVV0Z4Z1pHaHNjSFI0ZklBIn0seyJraW5kIjoidHVubmVsIiwidXJsIjoid3NzOi8vNGYxYzBkOWUyYjdhNmMzZThkNWYwYTFiMmMzZDRlNWYuZXhhbXBsZS5saW5rIiwidGlja2V0IjoiY29saWJyaWlfbHRfSVNJakpDVW1KeWdwS2lzc0xTNHZNQSJ9XX19"
+    },
+    "expected": {
+      "askerStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "askedStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "prologue": "colibrii-relay-v1:6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10>0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askFrame": "ask:4096:JE_juWPomd0pW6_84kjTUw86mnR5ugYwAmgOv-etrUnIrjc49D4o-T6y8NPjK_LAtc0VGrEHL5acgEc1Iq77fSkCl95jCCNzxQ1mNPTINL5MFlMvs6yKoUmEVv063HhJt5EoJM6gkLqLKWOAcak-1tp6tL9lyIyUE0QpNj6Sj-P7kpe0rFJ0dKGZJzbwrCVsf3A3il1Dxs9FStt37wxoGqBYHinF_apCVXZyHyBPLGU2A5w4UbKUxgRurdYS_BxhtV4gjol3og_0nEYBHtX4Csav",
+      "answerFrame": "answer:4096:iDGGuAC0HVzwQpaV2ps8xPMo680YSm5IL6V4wQPwbHfj80JxCsmL8jOyO1bbjr9JYI6DZcvYGsEuXCj94bHA8CxGtQkR6fJMWDVwKBui8PAQfULOKx9jugaTOxfrE-cRWoBHVxEcFvdxeZ89ui6lQUW12Sr35np02rEwukQSRgVLN0SL-bG-Dv15pFf6s2wKnZFYS1HCS883QI9vKgRW3eEqdAwxMBfYvsy7F717IG_zZe4J7pA8-Bwylo6J0C6_HZz5GySlRfQY2v0-6tUrHDnWEx3xopcVE-VPMYS6PUanUZXT2rJWmfg_2iJw0vdH_-eQh6K1C_u1Iooo2Ko-pPDusCPl1ydkOQjG8McODp0p8bxRKQ_tze8MA9zVOMSrfmnUHV3mLcl9OyT7SFkSAihrKVKjIs7EkUO0j4REi1Rr_AQZOWTbGrUndyaxCtwGAWovV3gLnU28--Iszqixu6Zkkt3uMKH7QAqETBo3RF-eSslKoh4C_wCWy5EuyPmJonJs6ub-w9cM49bxk4W63EwOG-_wlbaDiCoaCWL2",
+      "handshakeHash": "vXEwn8LOwG3WP2F59dSlHXduna2ZEBJk8x2dCGgjXyg",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["lan", "tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "available": true,
+          "candidates": [
+            {
+              "kind": "lan",
+              "url": "ws://192.168.1.20:41734",
+              "ticket": "colibrii_lt_AQIDBAUGBwgJCgsMDQ4PEA"
+            },
+            {
+              "kind": "lan",
+              "url": "ws://[2001:db8::20]:41734",
+              "ticket": "colibrii_lt_ERITFBUWFxgZGhscHR4fIA"
+            },
+            {
+              "kind": "tunnel",
+              "url": "wss://4f1c0d9e2b7a6c3e8d5f0a1b2c3d4e5f.example.link",
+              "ticket": "colibrii_lt_ISIjJCUmJygpKissLS4vMA"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "connectInfo from a web page, answered with the tunnel",
+    "inputs": {
+      "asker": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "asked": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "askerStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askerEphemeralPrivateKey": "oaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2-v8A",
+      "askedStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askedEphemeralPrivateKey": "wcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3-A",
+      "id": "9007199254740993",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsidHVubmVsIl0sImNvbm5lY3Rpb25JZCI6IjVjMWU5YTdkM2IyZjRlNmE4YzBkMWYzYjVhN2M5ZTJkIn19",
+      "answerPayload": "eyJvayI6dHJ1ZSwicmVzdWx0Ijp7ImF2YWlsYWJsZSI6dHJ1ZSwiY2FuZGlkYXRlcyI6W3sia2luZCI6InR1bm5lbCIsInVybCI6IndzczovLzRmMWMwZDllMmI3YTZjM2U4ZDVmMGExYjJjM2Q0ZTVmLmV4YW1wbGUubGluayIsInRpY2tldCI6ImNvbGlicmlpX2x0X01USXpORFUyTnpnNU9qczhQVDRfUUEifV19fQ"
+    },
+    "expected": {
+      "askerStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "askedStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "prologue": "colibrii-relay-v1:0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e>6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "askFrame": "ask:9007199254740993:rUOL-uMfbAk9YdQzklXqeYCSyfrdB7l4J_Swrp3ufBxQE5jb1ylykdyj2ibkiFnqkFSzrQJcT-Ce1n-eHZDoAH7Ak6PDIoRbQBQhgAnxik0IhU1akz5Kjn2DVz_ixbAJnmMoDFmJFrlfuvZ9Qd6WA2_K3U8iOoH3N1AdJ9SLwSCXfyCF9QlbT3IaoblxSCsQamPVTAACQlXgul-rhHUr8m3rJ66GUxyVA4LYvcygvy8wpBmP5DTWXU-NWNv5ny6jBxOuRRglQ_OqdTgY",
+      "answerFrame": "answer:9007199254740993:OlU9dHktcn76m5pM3j2hrZPxotDAnLY5saPA_aFMviTFKisPKB8_yca0LKXMuyZd5vmQD4MnlPyKSK4odq-WL9LfjrLZSOm1UDDwmBw7kn3A7RiJ-EUv08fI9b05wksIaSZGsZWbIFnyfLYf8qrOBid1n3Xh2wSCOiZ2UCeDTskW0kJ-M-l1Iqh-M6VtTlQahSUrTcB56YOSruKQANO2YS95G7sAC3r1EcI3a0w-pwQGdHt4U1HnJZMN4jq23_mhmN89ML21riwjRlmBzFQVlXFuA5jIt8zB_vqcXnqFJk0vmg",
+      "handshakeHash": "LKKr5GmV-tYfyruV2_iH6Vc_jebbSL4_piKooXfc-vE",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "available": true,
+          "candidates": [
+            {
+              "kind": "tunnel",
+              "url": "wss://4f1c0d9e2b7a6c3e8d5f0a1b2c3d4e5f.example.link",
+              "ticket": "colibrii_lt_MTIzNDU2Nzg5Ojs8PT4_QA"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "connectInfo answered with nothing available",
+    "inputs": {
+      "asker": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "asked": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "askerStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askerEphemeralPrivateKey": "4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_wA",
+      "askedStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askedEphemeralPrivateKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+      "id": "0",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsidHVubmVsIl0sImNvbm5lY3Rpb25JZCI6IjVjMWU5YTdkM2IyZjRlNmE4YzBkMWYzYjVhN2M5ZTJkIn19",
+      "answerPayload": "eyJvayI6dHJ1ZSwicmVzdWx0Ijp7ImF2YWlsYWJsZSI6ZmFsc2V9fQ"
+    },
+    "expected": {
+      "askerStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "askedStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "prologue": "colibrii-relay-v1:0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e>6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "askFrame": "ask:0:SJzrunoWbGGYNf4S7txYHb_Bs23hDIMOTwvBxIc0hktHn_0N4LqHIPa9iDnT2CwFKGI0otNxLzSiKO1YlBREHAlxncozBPS2EImntjlB78xWWyUUk0VjgyghOZbF9Ifa4oWGV1sksk4xa0jHHiUCoPYaA63_Hf2-Gov_ripLTU66VSJGhOM5bbQphqOC4_4MgFv65j6NGfay_Z2SMC6QvIfdnQnrenh68SmxqjTxDuer2L568MLzr666ieSgpLJoLDkAEL5D74m0_5Pp",
+      "answerFrame": "answer:0:B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHxqBzqKCVbr6QsxVsSic63NGpT4CwyTSHSxkupmk7EB6dnBAJi8bjpTB9oEZmIV-F292HRn9nl1tw",
+      "handshakeHash": "qhbC_dPtNBDRIiIPi_rF-kqhd5fq61mNslomsl8B_GU",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "available": false
+        }
+      }
+    }
+  },
+  {
+    "name": "connectInfo refused by a device that never listens",
+    "inputs": {
+      "asker": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "asked": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askerStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askerEphemeralPrivateKey": "Y2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYI",
+      "askedStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askedEphemeralPrivateKey": "g4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp-goaI",
+      "id": "0000000000000017",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsibGFuIiwidHVubmVsIl0sImNvbm5lY3Rpb25JZCI6IjVjMWU5YTdkM2IyZjRlNmE4YzBkMWYzYjVhN2M5ZTJkIn19",
+      "answerPayload": "eyJvayI6ZmFsc2UsImNvZGUiOiJuby1saXN0ZW5lciJ9"
+    },
+    "expected": {
+      "askerStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "askedStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "prologue": "colibrii-relay-v1:6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10>0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askFrame": "ask:0000000000000017:ldK1fJ9JsBEG-Vsd1ZPUrBHJp2I77dBvMtXgC9oX6Q54pjUymJyPLxhR7Vm8MGTlfseUxqOmFL7e45xPE3L9hT_KwaMbmqilHc0yYldqn8rN169MExmn0f0riv-M_VCYhy6LCVm-Jar8PW10LQ7bnKxjmszjfg9qS5Mq1hg8mvcXwnHq_LLpghNqaCbpVlDQ1fLSvQxJS10j6jaVZ1i5_tf0L1VllGd_dUNcLksrQuxOuy6ytcGh6orqeLy9NloclQ9NGjlzKMHCu1aDIedq6jDt",
+      "answerFrame": "answer:0000000000000017:nh9Sce9RWazEFQGeMuwE8yfZ2Fl5WoK8xA8N_9lWbmunqwVggOMWI3kKm-vPbfF1AthrZ5et5g7LoUlkytNogI1rwdwMuLPla34fQu9vgXDP",
+      "handshakeHash": "6NeNvmjvezUdYiAZ4txTWP98KsOQvppHR_HSo5sred4",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["lan", "tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "code": "no-listener"
+      }
+    }
+  },
+  {
+    "name": "connectInfo naming a kind the asked device does not know",
+    "inputs": {
+      "asker": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "asked": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askerStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askerEphemeralPrivateKey": "Z2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoOEhYY",
+      "askedStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askedEphemeralPrivateKey": "h4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaY",
+      "id": "52",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsibGFuIiwiY2Fycmllci1waWdlb24iLCJ0dW5uZWwiXSwiY29ubmVjdGlvbklkIjoiNWMxZTlhN2QzYjJmNGU2YThjMGQxZjNiNWE3YzllMmQiLCJzaW5jZSI6Mn19",
+      "answerPayload": "eyJvayI6dHJ1ZSwicmVzdWx0Ijp7ImF2YWlsYWJsZSI6dHJ1ZSwiY2FuZGlkYXRlcyI6W3sia2luZCI6InR1bm5lbCIsInVybCI6IndzczovLzRmMWMwZDllMmI3YTZjM2U4ZDVmMGExYjJjM2Q0ZTVmLmV4YW1wbGUubGluayIsInRpY2tldCI6ImNvbGlicmlpX2x0X1FVSkRSRVZHUjBoSlNrdE1UVTVQVUEifV19fQ"
+    },
+    "expected": {
+      "askerStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "askedStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "prologue": "colibrii-relay-v1:6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10>0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askFrame": "ask:52:zYQ5EHocz_7At2SeeKTXRIazlhITdQljr4nUewXK9HFazmjJf_fnz1_tV0sLAmUWJkN9iGnOdsQM7vbdY6FP8dLrzDBGC-xP5737ZPgFbkssYD3JjfWdjj62ofMyrQGiHOli_ZP-ETp5Wq0L_w4kcJJS2H5AMt4ohY79QSg8YacKWJc7vtpgg5P9QK47-ztIcfR7alZ2HkGLaXQMxPcwqqzVW6Dr3F6ewDMZptcYETn8qZtbGPmtN2FzHXZLCTT_CDRCNttoJ7WtJ0J2RIXbpnnq3LTCItQyZKc3cPtpai-rVNXWR5zhAbbqLoKU",
+      "answerFrame": "answer:52:7ZiiUFLQ27ki8fJbO_eRiJF0H1voRc0nfzKeifxjYHyxFKVhx64uN27Bn9wjOcU62tJx4kanu0lnPETppaCskeFbgGe-GsuWjDarojUcOcC3UTtLCQLsZhfLfRQpLT0jFZ8k-1zMzId2V1-GHWj-ys6FiB1qxBN3Ix85ANroduk07ONgjhrzt3XpYf1Z6yVcTQyVCCQp8qW7-fIhFM2jgUEspjtEZQGlZx76BIIrn5Sppwx4W8PWiL2cV_Vs70Uea1_SCOgk6jqr-e_aXzSNU25VvOFntfmlwrIJK8Gt3482aw",
+      "handshakeHash": "pOa0iQJNoTVrGWNquhX4b1Nz5E4NAMAV7nnIQq7y2ns",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["lan", "tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "available": true,
+          "candidates": [
+            {
+              "kind": "tunnel",
+              "url": "wss://4f1c0d9e2b7a6c3e8d5f0a1b2c3d4e5f.example.link",
+              "ticket": "colibrii_lt_QUJDREVGR0hJSktMTU5PUA"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "connectInfo answered with a candidate of a kind the asker does not know",
+    "inputs": {
+      "asker": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "asked": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askerStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askerEphemeralPrivateKey": "aWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4g",
+      "askedStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askedEphemeralPrivateKey": "iYqLjI2Oj5CRkpOUlZaXmJmam5ydnp-goaKjpKWmp6g",
+      "id": "53",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsibGFuIiwidHVubmVsIl0sImNvbm5lY3Rpb25JZCI6IjVjMWU5YTdkM2IyZjRlNmE4YzBkMWYzYjVhN2M5ZTJkIn19",
+      "answerPayload": "eyJvayI6dHJ1ZSwicmVzdWx0Ijp7ImF2YWlsYWJsZSI6dHJ1ZSwiY2FuZGlkYXRlcyI6W3sia2luZCI6ImxhbiIsInVybCI6IndzOi8vMTkyLjE2OC4xLjIwOjQxNzM0IiwidGlja2V0IjoiY29saWJyaWlfbHRfVVZKVFZGVldWMWhaV2x0Y1hWNWZZQSJ9LHsia2luZCI6ImNhcnJpZXItcGlnZW9uIiwidXJsIjoiY29vOi8vMTkyLjE2OC4xLjIwIiwibG9mdCI6M30seyJraW5kIjoidHVubmVsIiwidXJsIjoid3NzOi8vNGYxYzBkOWUyYjdhNmMzZThkNWYwYTFiMmMzZDRlNWYuZXhhbXBsZS5saW5rIiwidGlja2V0IjoiY29saWJyaWlfbHRfWVdKalpHVm1aMmhwYW10c2JXNXZjQSIsInNpbmNlIjoyfV19fQ"
+    },
+    "expected": {
+      "askerStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "askedStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "prologue": "colibrii-relay-v1:6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10>0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "askFrame": "ask:53:lPHjzZ5FLaaodDS0lcuR9Jn-YPYv-PQ6ykoPwCiLGDQ9L452qsSLgH0alHBAgHgL5ofuLSaLHgABHg8bH3Eb5Str7c0Y6a8dHMIw4ogvND_EP5yig5ogS5LjmOytVjKhauSoviOAHAQw57p8V97z8way3wapPcy_dyM0tiq4xyXjmOdI7bzm0imGmHy41XNmHbmesJkKCGXLzXizsL2QtH2Ta17BGLfZWQcHytG2areIa_9wdY5IHvycl2mqDxxzqq2vB9WqV-tlKh8ICr9iIR5I",
+      "answerFrame": "answer:53:jeEGIqYgMTNBCef99F9ILYG65N-hQvaH-1_nN3t4h1RHcV1Xh41MoY_4LVrM1J2OeZKmVhvCpz-Ee0R_8fTU-f95cdfjByIbD0USNwelAtTFEvFuCtIMoOU9tEv3Hmuvqiq6LJKyT4Xaevp43C-a1E2xgarHOZbnhMa5BUgeqda5qPiRkKTv1pj9OUYquXIrW_dj4S9vOp2bsYvszglTZ3N0ds5tHZGVJbHmyBo0ICVmKyKdXb_JIDpVODbY8zgLKgWCvogO7wpgL1UjJnLT3JDURvkPqeX3xedMKYolLZ7xlDZNQ2XsQPjk2Hh5CzsfAaHRmNHKXw2eQni7DnHSwyh8aXkbprB8Dozf_lCQ_sgrvsY1QR42MjhZxGSXxt441VCjyv0XyYXQM4MNHlh1ur6IvkqrsVAxoJTOYmt15XnLa-_ebWNkDRLnZQlfJE--Tx9zgvZsIBBAI_kRhoeshtMq3h0etoCRBB7PxGIpzBKVpFCjrVNxphUAKxMtQN04NQRo6TLHSQ",
+      "handshakeHash": "XtUQFLF3j8wt3p-37UTeuzMtJQXITxnKnBJZmKuTQuE",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["lan", "tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": true,
+        "result": {
+          "available": true,
+          "candidates": [
+            {
+              "kind": "lan",
+              "url": "ws://192.168.1.20:41734",
+              "ticket": "colibrii_lt_UVJTVFVWV1hZWltcXV5fYA"
+            },
+            {
+              "kind": "tunnel",
+              "url": "wss://4f1c0d9e2b7a6c3e8d5f0a1b2c3d4e5f.example.link",
+              "ticket": "colibrii_lt_YWJjZGVmZ2hpamtsbW5vcA"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "connectInfo refused with a code the asker does not know",
+    "inputs": {
+      "asker": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+      "asked": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "askerStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "askerEphemeralPrivateKey": "p6ipqqusra6vsLGys7S1tre4ubq7vL2-v8DBwsPExcY",
+      "askedStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "askedEphemeralPrivateKey": "x8jJysvMzc7P0NHS09TV1tfY2drb3N3e3-Dh4uPk5eY",
+      "id": "54",
+      "askPayload": "eyJhc2siOiJjb25uZWN0SW5mbyIsImlucHV0Ijp7ImRpYWxhYmxlS2luZHMiOlsidHVubmVsIl0sImNvbm5lY3Rpb25JZCI6IjVjMWU5YTdkM2IyZjRlNmE4YzBkMWYzYjVhN2M5ZTJkIn19",
+      "answerPayload": "eyJvayI6ZmFsc2UsImNvZGUiOiJidXN5In0"
+    },
+    "expected": {
+      "askerStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "askedStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "prologue": "colibrii-relay-v1:0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e>6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+      "askFrame": "ask:54:E1eDAuy6TTV3fWBMyy0SKZTyRQdVcwpNAbsJZBmUfFF_bscl7lT6qEFZfPAa4jBVvo9rTctkBYji5t9MphtoanGzQL3dYU1ptXEMPHgBSI1QN0oqHSUxtDfYfn2ve3ngb-xJp9S4xFGYRNX6sjHRfkRF_lGKhOJm48O4itVNqrqkVbMh0mfOHRqRGi9dRp97slA2W1uhcSISnyZeO6GfEWg0HxG6iBiknEKNPhlEcv5D6OXhp8v64RxoMr7_vTdlCCQeXnAL6_CBNzxZ",
+      "answerFrame": "answer:54:g5dSKuTdIhf_ScaW6mTWYCnr0Vu_DkqaoZYBLAB561b9Mw5D3hrijauCDi7fSEigFTwN5UAj5s8BVQG8M1L0tvlItOVwB3kiv1U",
+      "handshakeHash": "UybzIZQFIzPy3hnWwD46GOu1xkwoBDDtQ0X7UZEi23A",
+      "ask": {
+        "ask": "connectInfo",
+        "input": {
+          "dialableKinds": ["tunnel"],
+          "connectionId": "5c1e9a7d3b2f4e6a8c0d1f3b5a7c9e2d"
+        }
+      },
+      "answer": {
+        "ok": false,
+        "code": "busy"
+      }
+    }
+  }
+]

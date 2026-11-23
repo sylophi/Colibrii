@@ -1,0 +1,46 @@
+[
+  {
+    "name": "inkwell, user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG, 6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+    "inputs": {
+      "app": "inkwell",
+      "account": "user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG",
+      "device": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10"
+    },
+    "expected": {
+      "label": "731b50b084bc9b02f3ef299880a9762f"
+    }
+  },
+  {
+    "name": "inkwell, user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG, 0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+    "inputs": {
+      "app": "inkwell",
+      "account": "user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG",
+      "device": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e"
+    },
+    "expected": {
+      "label": "d74eb01757d6ad681f9b62b8f62672d8"
+    }
+  },
+  {
+    "name": "inkwell-dev, user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG, 6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+    "inputs": {
+      "app": "inkwell-dev",
+      "account": "user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG",
+      "device": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10"
+    },
+    "expected": {
+      "label": "0c437f5889512f669db35ded973465c7"
+    }
+  },
+  {
+    "name": "quill, user_01HZY3QJ5R8W2E6T4N7M9K0B1C, 0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+    "inputs": {
+      "app": "quill",
+      "account": "user_01HZY3QJ5R8W2E6T4N7M9K0B1C",
+      "device": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e"
+    },
+    "expected": {
+      "label": "13284a2d2d1dad360384025089308aab"
+    }
+  }
+]

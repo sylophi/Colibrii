@@ -1,0 +1,32 @@
+// The compiler options every package shares. Each one extends this and
+// adds its own types and include.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    // Effect's diagnostics, run by @effect/tsgo's build of the compiler.
+    // unstableApiUsage is off because the code builds on Effect's
+    // unstable http, http-api and sql modules, pinned to one version.
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": { "unstableApiUsage": "off" }
+      }
+    ]
+  }
+}

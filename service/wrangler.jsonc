@@ -1,0 +1,38 @@
+// For local development and the tests only, which give it its apps
+// (scripts/dev.ts, the test harness). A deployed instance runs from its
+// own instance.jsonc (instance.example.jsonc, README.md).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "colibrii",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [{ "name": "HUB", "class_name": "Hub" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "colibrii",
+      "database_id": "local",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "ratelimits": [
+    {
+      "name": "RATE_LIMIT",
+      "namespace_id": "1001",
+      "simple": { "limit": 300, "period": 60 },
+    },
+    {
+      "name": "RATE_LIMIT_OPEN",
+      "namespace_id": "1002",
+      "simple": { "limit": 60, "period": 60 },
+    },
+  ],
+  "vars": {
+    "TUNNEL_DOMAIN": "example.link",
+    "TUNNEL_ZONE_ID": "local",
+    "CLOUDFLARE_ACCOUNT_ID": "local",
+  },
+}

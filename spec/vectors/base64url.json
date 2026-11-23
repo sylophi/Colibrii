@@ -1,0 +1,245 @@
+[
+  {
+    "name": "encode nothing",
+    "inputs": {
+      "hex": ""
+    },
+    "expected": {
+      "base64url": ""
+    }
+  },
+  {
+    "name": "encode 66",
+    "inputs": {
+      "hex": "66"
+    },
+    "expected": {
+      "base64url": "Zg"
+    }
+  },
+  {
+    "name": "encode 666f",
+    "inputs": {
+      "hex": "666f"
+    },
+    "expected": {
+      "base64url": "Zm8"
+    }
+  },
+  {
+    "name": "encode 666f6f",
+    "inputs": {
+      "hex": "666f6f"
+    },
+    "expected": {
+      "base64url": "Zm9v"
+    }
+  },
+  {
+    "name": "encode 666f6f62",
+    "inputs": {
+      "hex": "666f6f62"
+    },
+    "expected": {
+      "base64url": "Zm9vYg"
+    }
+  },
+  {
+    "name": "encode 666f6f6261",
+    "inputs": {
+      "hex": "666f6f6261"
+    },
+    "expected": {
+      "base64url": "Zm9vYmE"
+    }
+  },
+  {
+    "name": "encode 666f6f626172",
+    "inputs": {
+      "hex": "666f6f626172"
+    },
+    "expected": {
+      "base64url": "Zm9vYmFy"
+    }
+  },
+  {
+    "name": "encode fbffbf",
+    "inputs": {
+      "hex": "fbffbf"
+    },
+    "expected": {
+      "base64url": "-_-_"
+    }
+  },
+  {
+    "name": "encode fbff",
+    "inputs": {
+      "hex": "fbff"
+    },
+    "expected": {
+      "base64url": "-_8"
+    }
+  },
+  {
+    "name": "decode nothing",
+    "inputs": {
+      "base64url": ""
+    },
+    "expected": {
+      "hex": ""
+    }
+  },
+  {
+    "name": "decode Zg",
+    "inputs": {
+      "base64url": "Zg"
+    },
+    "expected": {
+      "hex": "66"
+    }
+  },
+  {
+    "name": "decode Zg==",
+    "inputs": {
+      "base64url": "Zg=="
+    },
+    "expected": {
+      "hex": "66"
+    }
+  },
+  {
+    "name": "decode Zm8",
+    "inputs": {
+      "base64url": "Zm8"
+    },
+    "expected": {
+      "hex": "666f"
+    }
+  },
+  {
+    "name": "decode Zm8=",
+    "inputs": {
+      "base64url": "Zm8="
+    },
+    "expected": {
+      "hex": "666f"
+    }
+  },
+  {
+    "name": "decode Zm9v",
+    "inputs": {
+      "base64url": "Zm9v"
+    },
+    "expected": {
+      "hex": "666f6f"
+    }
+  },
+  {
+    "name": "decode Zm9vYg",
+    "inputs": {
+      "base64url": "Zm9vYg"
+    },
+    "expected": {
+      "hex": "666f6f62"
+    }
+  },
+  {
+    "name": "decode Zm9vYg==",
+    "inputs": {
+      "base64url": "Zm9vYg=="
+    },
+    "expected": {
+      "hex": "666f6f62"
+    }
+  },
+  {
+    "name": "decode -_-_",
+    "inputs": {
+      "base64url": "-_-_"
+    },
+    "expected": {
+      "hex": "fbffbf"
+    }
+  },
+  {
+    "name": "decode -_8",
+    "inputs": {
+      "base64url": "-_8"
+    },
+    "expected": {
+      "hex": "fbff"
+    }
+  },
+  {
+    "name": "decode -_8=",
+    "inputs": {
+      "base64url": "-_8="
+    },
+    "expected": {
+      "hex": "fbff"
+    }
+  },
+  {
+    "name": "decode Z",
+    "inputs": {
+      "base64url": "Z"
+    },
+    "expected": {
+      "invalid": true
+    }
+  },
+  {
+    "name": "decode Zg=",
+    "inputs": {
+      "base64url": "Zg="
+    },
+    "expected": {
+      "invalid": true
+    }
+  },
+  {
+    "name": "decode Zm9vY===",
+    "inputs": {
+      "base64url": "Zm9vY==="
+    },
+    "expected": {
+      "invalid": true
+    }
+  },
+  {
+    "name": "decode Zg==Zg",
+    "inputs": {
+      "base64url": "Zg==Zg"
+    },
+    "expected": {
+      "invalid": true
+    }
+  },
+  {
+    "name": "decode +/+/",
+    "inputs": {
+      "base64url": "+/+/"
+    },
+    "expected": {
+      "invalid": true
+    }
+  },
+  {
+    "name": "decode Zm9v+A",
+    "inputs": {
+      "base64url": "Zm9v+A"
+    },
+    "expected": {
+      "invalid": true
+    }
+  },
+  {
+    "name": "decode Zm 9v",
+    "inputs": {
+      "base64url": "Zm 9v"
+    },
+    "expected": {
+      "invalid": true
+    }
+  }
+]

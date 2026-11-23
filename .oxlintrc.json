@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import"],
+  "categories": {
+    "correctness": "error",
+    "perf": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+    ],
+    "no-underscore-dangle": ["error", { "allow": ["_tag"] }],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/test/**", "**/scripts/**", "harness/**"],
+      "rules": { "no-await-in-loop": "off" }
+    }
+  ],
+  "ignorePatterns": ["**/node_modules/**", "**/.wrangler/**"]
+}

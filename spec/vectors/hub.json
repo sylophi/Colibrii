@@ -1,0 +1,557 @@
+[
+  {
+    "name": "socket: relay from the device",
+    "inputs": {
+      "socket": "relay",
+      "from": "device"
+    },
+    "expected": {
+      "json": {
+        "t": "relay",
+        "to": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+        "frame": "ask:4096:HyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-"
+      }
+    }
+  },
+  {
+    "name": "socket: relay from the service",
+    "inputs": {
+      "socket": "relay",
+      "from": "service"
+    },
+    "expected": {
+      "json": {
+        "t": "relay",
+        "from": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+        "frame": "ask:4096:HyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-"
+      }
+    }
+  },
+  {
+    "name": "socket: presence",
+    "inputs": {
+      "socket": "presence",
+      "from": "service"
+    },
+    "expected": {
+      "json": {
+        "t": "presence",
+        "online": [
+          {
+            "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+            "publicKey": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
+            "connections": "multi"
+          },
+          {
+            "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+            "publicKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+            "connections": "single"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "socket: nack",
+    "inputs": {
+      "socket": "nack",
+      "from": "service"
+    },
+    "expected": {
+      "json": {
+        "t": "nack",
+        "to": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+        "reason": "offline"
+      }
+    }
+  },
+  {
+    "name": "POST /devices/enroll request",
+    "inputs": {
+      "route": "POST /devices/enroll",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "app": "inkwell",
+        "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+        "name": "Studio MacBook",
+        "publicKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+        "connections": "single",
+        "data": {
+          "icon": "laptop"
+        }
+      }
+    }
+  },
+  {
+    "name": "POST /devices/enroll request without data",
+    "inputs": {
+      "route": "POST /devices/enroll",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "app": "inkwell",
+        "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+        "name": "Firefox on the studio desktop",
+        "publicKey": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
+        "connections": "multi"
+      }
+    }
+  },
+  {
+    "name": "POST /devices/enroll answer",
+    "inputs": {
+      "route": "POST /devices/enroll",
+      "body": "answer"
+    },
+    "expected": {
+      "json": {
+        "credential": "colibrii_dc_ycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-g",
+        "accountId": "user_2xK9mQ4bW7nR3tY8vZ1pL6sD0fG",
+        "device": {
+          "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+          "name": "Studio MacBook",
+          "data": {
+            "icon": "laptop"
+          },
+          "connections": "single",
+          "createdAt": 1793100000000,
+          "lastSeenAt": 1793180000000,
+          "online": true
+        }
+      }
+    }
+  },
+  {
+    "name": "POST /sign-in-token request",
+    "inputs": {
+      "route": "POST /sign-in-token",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "app": "inkwell"
+      }
+    }
+  },
+  {
+    "name": "POST /sign-in-token answer",
+    "inputs": {
+      "route": "POST /sign-in-token",
+      "body": "answer"
+    },
+    "expected": {
+      "json": {
+        "token": "sit_3c9d0e1f2a4b5c6d7e8f9a0b1c2d3e4f"
+      }
+    }
+  },
+  {
+    "name": "GET /devices answer",
+    "inputs": {
+      "route": "GET /devices",
+      "body": "answer"
+    },
+    "expected": {
+      "json": {
+        "devices": [
+          {
+            "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+            "name": "Studio MacBook",
+            "data": {
+              "icon": "laptop"
+            },
+            "connections": "single",
+            "createdAt": 1793100000000,
+            "lastSeenAt": 1793180000000,
+            "online": true
+          },
+          {
+            "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+            "name": "Firefox on the studio desktop",
+            "data": {},
+            "connections": "multi",
+            "createdAt": 1793150000000,
+            "lastSeenAt": null,
+            "online": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "PATCH /devices/:deviceId request with a name",
+    "inputs": {
+      "route": "PATCH /devices/:deviceId",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "name": "Studio MacBook Pro"
+      }
+    }
+  },
+  {
+    "name": "PATCH /devices/:deviceId request with data",
+    "inputs": {
+      "route": "PATCH /devices/:deviceId",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "data": {
+          "icon": "desktop",
+          "pinned": true,
+          "order": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "PATCH /devices/:deviceId request with both",
+    "inputs": {
+      "route": "PATCH /devices/:deviceId",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "name": "Studio",
+        "data": {}
+      }
+    }
+  },
+  {
+    "name": "POST /tickets request",
+    "inputs": {
+      "route": "POST /tickets",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "connectionId": "3f9a0c1e5b7d4f2a8c6e0b1d3f5a7c9e"
+      }
+    }
+  },
+  {
+    "name": "POST /tickets answer",
+    "inputs": {
+      "route": "POST /tickets",
+      "body": "answer"
+    },
+    "expected": {
+      "json": {
+        "ticket": "colibrii_ct_aW5rd2VsbC91c2VyXzJ4SzltUTRiVzduUjN0WTh2WjFwTDZzRDBmRw.BwgJCgsMDQ4PEBESExQVFg.TU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2w"
+      }
+    }
+  },
+  {
+    "name": "POST /tunnel request",
+    "inputs": {
+      "route": "POST /tunnel",
+      "body": "request"
+    },
+    "expected": {
+      "json": {
+        "port": 41734
+      }
+    }
+  },
+  {
+    "name": "POST /tunnel answer",
+    "inputs": {
+      "route": "POST /tunnel",
+      "body": "answer"
+    },
+    "expected": {
+      "json": {
+        "hostname": "4f1c0d9e2b7a6c3e8d5f0a1b2c3d4e5f.example.link",
+        "connectorToken": "eyJhIjoiMDAwMCIsInQiOiIxMTExIiwicyI6IjIyMjIifQ",
+        "fresh": true
+      }
+    }
+  },
+  {
+    "name": "socket: presence with an entry the reader cannot read",
+    "inputs": {
+      "socket": "presence",
+      "from": "service",
+      "json": {
+        "t": "presence",
+        "online": [
+          {
+            "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+            "publicKey": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
+            "connections": "multi"
+          },
+          {
+            "deviceId": "3e8f2a6b-9c1d-4e7f-8a2b-5c6d7e8f9a0b",
+            "publicKey": "l5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tbY",
+            "connections": "fleet"
+          },
+          {
+            "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+            "publicKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+            "connections": "single",
+            "since": 1793180000000
+          }
+        ]
+      }
+    },
+    "expected": {
+      "json": {
+        "t": "presence",
+        "online": [
+          {
+            "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+            "publicKey": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
+            "connections": "multi"
+          },
+          {
+            "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+            "publicKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+            "connections": "single"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "socket: nack with a reason the reader does not know",
+    "inputs": {
+      "socket": "nack",
+      "from": "service",
+      "json": {
+        "t": "nack",
+        "to": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+        "reason": "busy"
+      }
+    },
+    "expected": {
+      "json": {
+        "t": "nack",
+        "to": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+        "reason": "busy"
+      }
+    }
+  },
+  {
+    "name": "GET /devices answer with an entry the reader cannot read",
+    "inputs": {
+      "route": "GET /devices",
+      "body": "answer",
+      "json": {
+        "devices": [
+          {
+            "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+            "name": "Studio MacBook",
+            "data": {
+              "icon": "laptop"
+            },
+            "connections": "single",
+            "createdAt": 1793100000000,
+            "lastSeenAt": 1793180000000,
+            "online": true
+          },
+          {
+            "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e",
+            "name": "Firefox on the studio desktop",
+            "data": {},
+            "connections": "fleet",
+            "createdAt": 1793150000000,
+            "lastSeenAt": null,
+            "online": false
+          }
+        ],
+        "more": false
+      }
+    },
+    "expected": {
+      "json": {
+        "devices": [
+          {
+            "deviceId": "6f1c2a9e-0b7d-4d0e-9a51-3c2b8e4f7a10",
+            "name": "Studio MacBook",
+            "data": {
+              "icon": "laptop"
+            },
+            "connections": "single",
+            "createdAt": 1793100000000,
+            "lastSeenAt": 1793180000000,
+            "online": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "socket: ping",
+    "inputs": {
+      "socket": "ping",
+      "from": "device"
+    },
+    "expected": {
+      "text": "ping"
+    }
+  },
+  {
+    "name": "socket: pong",
+    "inputs": {
+      "socket": "pong",
+      "from": "service"
+    },
+    "expected": {
+      "text": "pong"
+    }
+  },
+  {
+    "name": "error: UpdateRequired",
+    "inputs": {
+      "error": "UpdateRequired"
+    },
+    "expected": {
+      "status": 403,
+      "json": {
+        "_tag": "UpdateRequired",
+        "floor": 1
+      }
+    }
+  },
+  {
+    "name": "error: LoginRejected",
+    "inputs": {
+      "error": "LoginRejected"
+    },
+    "expected": {
+      "status": 401,
+      "json": {
+        "_tag": "LoginRejected"
+      }
+    }
+  },
+  {
+    "name": "error: UnknownApp",
+    "inputs": {
+      "error": "UnknownApp"
+    },
+    "expected": {
+      "status": 404,
+      "json": {
+        "_tag": "UnknownApp",
+        "app": "slate"
+      }
+    }
+  },
+  {
+    "name": "error: CredentialRejected",
+    "inputs": {
+      "error": "CredentialRejected"
+    },
+    "expected": {
+      "status": 401,
+      "json": {
+        "_tag": "CredentialRejected"
+      }
+    }
+  },
+  {
+    "name": "error: DeviceRevoked",
+    "inputs": {
+      "error": "DeviceRevoked"
+    },
+    "expected": {
+      "status": 403,
+      "json": {
+        "_tag": "DeviceRevoked"
+      }
+    }
+  },
+  {
+    "name": "error: DeviceEnrolledElsewhere",
+    "inputs": {
+      "error": "DeviceEnrolledElsewhere"
+    },
+    "expected": {
+      "status": 409,
+      "json": {
+        "_tag": "DeviceEnrolledElsewhere"
+      }
+    }
+  },
+  {
+    "name": "error: AccountFull",
+    "inputs": {
+      "error": "AccountFull"
+    },
+    "expected": {
+      "status": 409,
+      "json": {
+        "_tag": "AccountFull",
+        "limit": 16
+      }
+    }
+  },
+  {
+    "name": "error: UnknownDevice",
+    "inputs": {
+      "error": "UnknownDevice"
+    },
+    "expected": {
+      "status": 404,
+      "json": {
+        "_tag": "UnknownDevice",
+        "deviceId": "0b6e3c1d-2f4a-4b8c-9d0e-1f2a3b4c5d6e"
+      }
+    }
+  },
+  {
+    "name": "error: TicketMalformed",
+    "inputs": {
+      "error": "TicketMalformed"
+    },
+    "expected": {
+      "status": 403,
+      "json": {
+        "_tag": "TicketMalformed"
+      }
+    }
+  },
+  {
+    "name": "error: UpgradeRequired",
+    "inputs": {
+      "error": "UpgradeRequired"
+    },
+    "expected": {
+      "status": 426,
+      "json": {
+        "_tag": "UpgradeRequired"
+      }
+    }
+  },
+  {
+    "name": "error: SignInTokensOff",
+    "inputs": {
+      "error": "SignInTokensOff"
+    },
+    "expected": {
+      "status": 403,
+      "json": {
+        "_tag": "SignInTokensOff"
+      }
+    }
+  },
+  {
+    "name": "error: Unavailable",
+    "inputs": {
+      "error": "Unavailable"
+    },
+    "expected": {
+      "status": 502,
+      "json": {
+        "_tag": "Unavailable",
+        "operation": "sign-in-token"
+      }
+    }
+  }
+]

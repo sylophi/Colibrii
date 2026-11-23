@@ -1,0 +1,13 @@
+// The package as it is packed: JavaScript and declarations in dist/,
+// with the sources' `.ts` imports rewritten to `.js`.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"]
+}

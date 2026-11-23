@@ -1,0 +1,28 @@
+{
+  "name": "@colibrii/service",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply DB --local && node scripts/dev.ts",
+    "deploy": "wrangler d1 migrations apply DB --remote -c instance.jsonc && wrangler deploy -c instance.jsonc",
+    "typecheck": "$(effect-tsgo get-exe-path) && $(effect-tsgo get-exe-path) -p test",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clerk/backend": "catalog:",
+    "@colibrii/sdk": "workspace:*",
+    "@effect/sql-sqlite-do": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@colibrii/harness": "workspace:*",
+    "@effect/tsgo": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

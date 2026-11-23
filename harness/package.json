@@ -1,0 +1,23 @@
+{
+  "name": "@colibrii/harness",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "$(effect-tsgo get-exe-path)"
+  },
+  "dependencies": {
+    "@clerk/backend": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

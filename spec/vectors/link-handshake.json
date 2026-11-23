@@ -1,0 +1,38 @@
+[
+  {
+    "name": "dialing with colibrii_lt_AQIDBAUGBwgJCgsMDQ4PEA",
+    "inputs": {
+      "ticket": "colibrii_lt_AQIDBAUGBwgJCgsMDQ4PEA",
+      "dialerStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "dialerEphemeralPrivateKey": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5_gIGCg4Q",
+      "listenerStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "listenerEphemeralPrivateKey": "hYaHiImKi4yNjo-QkZKTlJWWl5iZmpucnZ6foKGio6Q"
+    },
+    "expected": {
+      "dialerStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "listenerStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "prologue": "colibrii-link-v1:colibrii_lt_AQIDBAUGBwgJCgsMDQ4PEA",
+      "firstMessage": "ACJjb2xpYnJpaV9sdF9BUUlEQkFVR0J3Z0pDZ3NNRFE0UEVBVxR2nRFr92Q2rnS8eT0sMK0ZA8WaxSc4BcfiaYtBDDYgqR7NlyynuuGa0GVcxKrMugedi6RP8h1Ple2Lfm-OU_cMzVa-MorAtTMbiqLaMx7b0XQm6L1-GHsllJ-Z5D71",
+      "secondMessage": "4IlcgX1fZ80BfwqRCpM_Y9qWf1upl5K3icTXVnXDGVmh4eATd1mr2MQnnfBJPzOa",
+      "handshakeHash": "79_gVPwc7x6hzqq8gh99-W4ljqkWqoPCS14C8EoNdjw"
+    }
+  },
+  {
+    "name": "dialing with colibrii_lt_MTIzNDU2Nzg5Ojs8PT4_QA",
+    "inputs": {
+      "ticket": "colibrii_lt_MTIzNDU2Nzg5Ojs8PT4_QA",
+      "dialerStaticPrivateKey": "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2A",
+      "dialerEphemeralPrivateKey": "paanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8Q",
+      "listenerStaticPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+      "listenerEphemeralPrivateKey": "xcbHyMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Q"
+    },
+    "expected": {
+      "dialerStaticPublicKey": "ZLEBsdC-WocEvQePmJUAH8A-jp-VIvGI3RKNmEbUhGY",
+      "listenerStaticPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+      "prologue": "colibrii-link-v1:colibrii_lt_MTIzNDU2Nzg5Ojs8PT4_QA",
+      "firstMessage": "ACJjb2xpYnJpaV9sdF9NVEl6TkRVMk56ZzVPanM4UFQ0X1FBCHFVhpXDmAqAnN1-2Wg4_QPR2VWKcNd9FwbZgoQTd2I73Nq1m6DEcpJfalqFdfZDY3vUvJhspxF_m6xpjS1OzFbXAGJjbh350q-YT88SrgcG9pBItiNQT1gUxfeBm1tp",
+      "secondMessage": "nuKtS0mkzkmQGCYxMNXIp9z_sHGuoVVNEZEBm5qihx5z-VSk8Mug4jtHI4VrVrhK",
+      "handshakeHash": "jcUVIg45x9z_SMwtAl3NAVG4wWeMeJCvGmSC-v5NDpQ"
+    }
+  }
+]
