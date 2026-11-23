@@ -18,6 +18,7 @@ use crate::runtime::Runtime;
 use crate::session::Session;
 use crate::store::{CredentialStore, Enrollment, Owed, Stored};
 use crate::testing::{self, Hooks};
+use crate::tunnel::TunnelOptions;
 use crate::watch::Watch;
 use crate::wire::api::{DeviceList, DevicePatch, EnrollRequest, EnrollResponse, ServiceError};
 use crate::wire::base64url;
@@ -108,6 +109,7 @@ pub struct Options {
     pub(crate) store: Arc<dyn CredentialStore>,
     pub(crate) device_id: Option<String>,
     pub(crate) listen: Option<Listen>,
+    pub(crate) tunnel: Option<TunnelOptions>,
     pub(crate) runtime: Option<tokio::runtime::Handle>,
     pub(crate) hooks: Arc<dyn Hooks>,
 }
@@ -128,6 +130,7 @@ impl Options {
             store,
             device_id: None,
             listen: None,
+            tunnel: None,
             runtime: None,
             hooks: testing::none(),
         }
@@ -147,6 +150,14 @@ impl Options {
     /// peer asking so.
     pub fn listen(mut self, listen: Listen) -> Options {
         self.listen = Some(listen);
+        self
+    }
+
+    /// Runs a tunnel to the listener with `cloudflared`, so peers outside
+    /// the LAN can dial it. Without one, a listening device offers its LAN
+    /// addresses alone.
+    pub fn tunnel(mut self, tunnel: TunnelOptions) -> Options {
+        self.tunnel = Some(tunnel);
         self
     }
 

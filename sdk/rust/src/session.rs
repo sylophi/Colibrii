@@ -4,13 +4,17 @@
 use std::sync::Arc;
 
 use crate::Link;
-use crate::device::{AccountState, Inner};
+use crate::device::{AccountState, Inner, TunnelState};
 use crate::errors::{DialError, Error};
+use crate::hub_api;
 use crate::hub_socket::{AnswerFn, HubSocket, Identity, Shared};
 use crate::listener::Listener;
 use crate::store::{Enrollment, Stored};
+use crate::tunnel::{self, Provision};
+use crate::wire::api::{TunnelRequest, TunnelResponse};
 use crate::wire::noise::KeyPair;
 use crate::wire::relay::{Answer, ConnectInfoInput};
+use reqwest::Method;
 
 pub(crate) struct Session {
     identity: Arc<Identity>,
@@ -32,6 +36,25 @@ fn answer_for(listener: Option<Arc<Listener>>) -> AnswerFn {
             match listener {
                 None => Answer::Refused("no-listener".into()),
                 Some(listener) => Answer::Ok(listener.connect_info(&from, &input).await),
+            }
+        })
+    })
+}
+
+/// `POST /tunnel` for the port. An error that stops the device settles it
+/// apart from the tunnel's run, which settling ends.
+fn provision(inner: &Arc<Inner>, credential: &str, port: u16) -> Provision {
+    let (inner, credential) = (inner.clone(), credential.to_owned());
+    Arc::new(move || {
+        let (inner, credential) = (inner.clone(), credential.clone());
+        Box::pin(async move {
+            let request = TunnelRequest { port };
+            match inner.api.call(Method::POST, "/tunnel", &credential, Some(&request), hub_api::DEVICE).await {
+                Ok(answer) => serde_json::from_value::<TunnelResponse>(answer).ok(),
+                Err(error) => {
+                    inner.settle_on(&credential, &error);
+                    None
+                }
             }
         })
     })
@@ -65,6 +88,34 @@ impl Session {
                         inner.state.lock().unwrap().enrollment = Some(current.clone());
                         inner.write_stored(Stored::Enrollment(current)).await?;
                     }
+                }
+                if let Some(options) = inner.options.tunnel.clone() {
+                    let (running, runner) = tunnel::run(
+                        options,
+                        inner.options.hooks.clone(),
+                        provision(&inner, &stored.credential, listener.reached_at),
+                        shared.ended.clone(),
+                    );
+                    // Not cut short as the session ends: it stops its
+                    // cloudflared first.
+                    shared.tasks.spawn(runner);
+                    let mut state = running.state.subscribe();
+                    let following = inner.clone();
+                    shared.spawn(async move {
+                        loop {
+                            following.tunnel.send_replace(state.borrow_and_update().clone());
+                            if state.changed().await.is_err() {
+                                return;
+                            }
+                        }
+                    });
+                    let (checking, mut wakes) = (running.clone(), inner.wakes.subscribe());
+                    shared.spawn(async move {
+                        while wakes.changed().await.is_ok() {
+                            checking.check();
+                        }
+                    });
+                    let _ = listener.tunnel.set(running);
                 }
                 Some(listener)
             }
@@ -121,5 +172,6 @@ impl Session {
         self.shared.tasks.close();
         self.shared.tasks.wait().await;
         self.inner.peers.send_replace(Vec::new());
+        self.inner.tunnel.send_replace(TunnelState::Off);
     }
 }

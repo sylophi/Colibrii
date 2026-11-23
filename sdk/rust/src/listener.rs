@@ -14,9 +14,10 @@ use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use crate::conn::{Conn, Msg};
-use crate::device::Inner;
+use crate::device::{Inner, TunnelState};
 use crate::hub_socket::{Identity, Join, Shared};
 use crate::link::{LiveLink, NewLink, Role};
+use crate::tunnel::RunningTunnel;
 use crate::wire::link::{
     CLOSE_GOING_AWAY, CLOSE_HANDSHAKE_REFUSED, CLOSE_HELLO_REFUSED, CLOSE_LOCKED_OUT, CLOSE_PROTOCOL_ERROR,
     CLOSE_TRY_AGAIN, LOCKOUT_GUESSES, LOCKOUT_MS, MAX_APP_BYTES, MAX_SOCKETS, MAX_UNWELCOMED_SOCKETS, Refuse,
@@ -24,7 +25,9 @@ use crate::wire::link::{
     open_transport_message, seal_transport_message,
 };
 use crate::wire::noise::{MAX_MESSAGE_BYTES, Transport};
-use crate::wire::relay::{Candidate, CandidateKind, ConnectInfoInput, ConnectInfoResult, MAX_LAN_CANDIDATES};
+use crate::wire::relay::{
+    Candidate, CandidateKind, ConnectInfoInput, ConnectInfoResult, MAX_LAN_CANDIDATES, TUNNEL_WAIT_MS,
+};
 use crate::wire::same_key;
 use crate::{Link, tickets::Check, tickets::LinkTickets};
 
@@ -155,9 +158,16 @@ impl State {
     }
 }
 
+// A peer that asks again after this many asks that offered the tunnel and
+// never reached the listener has the tunnel checked (spec/tunnels.md,
+// "Checking again").
+const UNREACHED_ASKS: u32 = 2;
+
 pub(crate) struct Listener {
     pub port: u16,
-    reached_at: u16,
+    /// The port peers reach it at, which the tunnel routes to.
+    pub reached_at: u16,
+    pub tunnel: std::sync::OnceLock<Arc<RunningTunnel>>,
     inner: Arc<Inner>,
     identity: Arc<Identity>,
     shared: Arc<Shared>,
@@ -210,6 +220,7 @@ impl Listener {
         let listener = Arc::new(Listener {
             port,
             reached_at: listen.advertised_port.unwrap_or(port),
+            tunnel: std::sync::OnceLock::new(),
             inner,
             identity,
             shared: shared.clone(),
@@ -465,9 +476,31 @@ impl Listener {
         Some(link)
     }
 
-    /// This device's answer to a peer's connectInfo ask.
+    /// This device's answer to a peer's connectInfo ask. An asker that can
+    /// dial the tunnel and would get nothing waits a little for a tunnel
+    /// that is starting.
     pub async fn connect_info(&self, from: &str, input: &ConnectInfoInput) -> ConnectInfoResult {
-        self.offer(from, input)
+        let Some(tunnel) = self.tunnel.get() else { return self.offer(from, input) };
+        if self.state.lock().unwrap().unreached.get(from) == Some(&UNREACHED_ASKS) {
+            tunnel.check();
+        }
+        let now = self.offer(from, input);
+        if matches!(now, ConnectInfoResult::Available(_)) || !input.dialable_kinds.contains(&CandidateKind::Tunnel) {
+            return now;
+        }
+        let mut state = tunnel.state.subscribe();
+        let settled = timeout(
+            Duration::from_millis(TUNNEL_WAIT_MS),
+            state.wait_for(|state| !matches!(state, TunnelState::Starting)),
+        )
+        .await;
+        match settled {
+            Ok(Ok(state)) if matches!(*state, TunnelState::Up { .. }) => {
+                drop(state);
+                self.offer(from, input)
+            }
+            _ => now,
+        }
     }
 
     fn offer(&self, from: &str, input: &ConnectInfoInput) -> ConnectInfoResult {
@@ -477,6 +510,12 @@ impl Listener {
             for address in lan_addresses(&found) {
                 candidates.push((CandidateKind::Lan, format!("ws://{address}:{}", self.reached_at)));
             }
+        }
+        if input.dialable_kinds.contains(&CandidateKind::Tunnel)
+            && let Some(tunnel) = self.tunnel.get()
+            && let TunnelState::Up { hostname } = &*tunnel.state.borrow()
+        {
+            candidates.push((CandidateKind::Tunnel, format!("wss://{hostname}")));
         }
         if candidates.is_empty() {
             return ConnectInfoResult::Unavailable;

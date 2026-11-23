@@ -4,6 +4,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 pub use crate::conn::{Close, Msg, Opened};
+pub use crate::tunnel::Timings;
 use crate::wire::relay::CandidateKind;
 
 pub trait Hooks: Send + Sync + 'static {
@@ -37,6 +38,16 @@ pub trait Hooks: Send + Sync + 'static {
 
     /// The port the listener bound.
     fn bound(&self, _port: u16) {}
+
+    /// The `cloudflared` the tunnel runner looks for on the `PATH`.
+    fn cloudflared_on_path(&self) -> String {
+        "cloudflared".into()
+    }
+
+    /// Where the tunnel runner fetches its hostname.
+    fn probe_url(&self, hostname: &str) -> String {
+        format!("https://{hostname}")
+    }
 }
 
 pub(crate) struct NoHooks;

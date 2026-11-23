@@ -86,6 +86,19 @@ impl<T> Drop for Task<T> {
     }
 }
 
+/// Runs `future` on a runtime of its own, from wherever it is awaited, for
+/// what the SDK does apart from any device.
+pub(crate) async fn on_own_runtime<F>(future: F) -> F::Output
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let runtime = Runtime::new(None).expect("a runtime");
+    let output = runtime.run(future).await;
+    runtime.stop();
+    output
+}
+
 /// Runs a future to its end on this thread, for an app that calls the SDK
 /// from a plain thread. Any executor does as well.
 pub fn block_on<F: Future>(future: F) -> F::Output {
