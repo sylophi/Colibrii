@@ -16,13 +16,13 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use crate::conn::{Conn, Msg};
 use crate::device::{Inner, TunnelState};
 use crate::hub_socket::{Identity, Join, Shared};
-use crate::link::{LiveLink, NewLink, Role};
+use crate::link::{LiveLink, NewLink, Role, send_sealed};
 use crate::tunnel::RunningTunnel;
 use crate::wire::link::{
     CLOSE_GOING_AWAY, CLOSE_HANDSHAKE_REFUSED, CLOSE_HELLO_REFUSED, CLOSE_LOCKED_OUT, CLOSE_PROTOCOL_ERROR,
     CLOSE_TRY_AGAIN, LOCKOUT_GUESSES, LOCKOUT_MS, MAX_APP_BYTES, MAX_SOCKETS, MAX_UNWELCOMED_SOCKETS, Refuse,
     TransportMessage, WELCOME_WITHIN_MS, Welcome, answer_handshake, decode_first_message, fits_transport_message,
-    open_transport_message, seal_transport_message,
+    open_transport_message,
 };
 use crate::wire::noise::{MAX_MESSAGE_BYTES, Transport};
 use crate::wire::relay::{
@@ -343,19 +343,14 @@ impl Listener {
     /// socket was closed.
     async fn admit(&self, conn: &Arc<Conn>, id: u64, arrival: &Arrival) -> Option<Arc<LiveLink>> {
         let refuse_with = |transport: &mut Transport, refuse: Refuse| {
-            if let Ok(sealed) = seal_transport_message(transport, &TransportMessage::Refuse(refuse)) {
-                conn.send(Msg::Binary(sealed));
-            }
+            send_sealed(conn, transport, &TransportMessage::Refuse(refuse));
             conn.close(CLOSE_HELLO_REFUSED, "refused");
         };
         let colibrii = |reason: &str| Refuse::Colibrii { reason: reason.to_owned() };
         let address = Some(arrival.address.as_str());
 
         let first = conn.receive().await.ok()?;
-        let Some((ticket, message)) = (match &first {
-            Msg::Binary(bytes) => decode_first_message(bytes),
-            Msg::Text(_) => None,
-        }) else {
+        let Some((ticket, message)) = first.as_binary().and_then(decode_first_message) else {
             self.refuse_handshake(conn, address);
             return None;
         };
@@ -388,10 +383,8 @@ impl Listener {
         let (dialer_key, mut transport) = (opened.dialer_key, opened.transport);
         conn.send(Msg::Binary(opened.second));
 
-        let said = match conn.receive().await.ok()? {
-            Msg::Binary(bytes) => open_transport_message(&mut transport, &bytes),
-            Msg::Text(_) => None,
-        };
+        let said =
+            conn.receive().await.ok()?.as_binary().and_then(|bytes| open_transport_message(&mut transport, bytes));
         let Some(TransportMessage::Hello(hello)) = said else {
             conn.close(CLOSE_PROTOCOL_ERROR, "expected hello");
             return None;

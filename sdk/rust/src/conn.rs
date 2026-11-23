@@ -34,6 +34,16 @@ pub enum Msg {
     Binary(Vec<u8>),
 }
 
+impl Msg {
+    /// A binary message's bytes. A peer link carries nothing else.
+    pub(crate) fn as_binary(&self) -> Option<&[u8]> {
+        match self {
+            Msg::Binary(bytes) => Some(bytes),
+            Msg::Text(_) => None,
+        }
+    }
+}
+
 /// How a socket closed: the code and reason of the close frame that ended
 /// it, sent or received.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -68,6 +68,14 @@ pub struct LinkClosed {
     pub cause: LinkCloseCause,
 }
 
+/// Seals a transport message and sends it at once, which keeps the sending
+/// cipher's counter and the socket in one order.
+pub(crate) fn send_sealed(conn: &Conn, transport: &mut Transport, message: &TransportMessage) {
+    if let Ok(sealed) = seal_transport_message(transport, message) {
+        conn.send(Msg::Binary(sealed));
+    }
+}
+
 /// What the device keeps of a link: the key its peer proved, and its end
 /// with a cause of the device's own.
 pub(crate) struct LiveLink {
@@ -131,13 +139,8 @@ impl LiveLink {
         });
     }
 
-    /// Seals and sends at once, so the sending cipher's counter and the
-    /// socket keep one order.
     pub fn send_message(&self, message: &TransportMessage) {
-        let mut transport = self.transport.lock().unwrap();
-        if let Ok(sealed) = seal_transport_message(&mut transport, message) {
-            self.conn.send(Msg::Binary(sealed));
-        }
+        send_sealed(&self.conn, &mut self.transport.lock().unwrap(), message);
     }
 
     async fn read(&self, heard: &Heard) {
@@ -148,10 +151,8 @@ impl LiveLink {
                 Err(close) => return self.end(close.code, LinkCloseCause::Peer),
             };
             heard.hear();
-            let message = match data {
-                Msg::Binary(bytes) => open_transport_message(&mut self.transport.lock().unwrap(), &bytes),
-                Msg::Text(_) => None,
-            };
+            let message =
+                data.as_binary().and_then(|bytes| open_transport_message(&mut self.transport.lock().unwrap(), bytes));
             match message {
                 Some(TransportMessage::Data { more, body }) => match joiner.add(more, body) {
                     Joined::TooBig => return self.end(CLOSE_TOO_BIG, LinkCloseCause::TooBig),
@@ -263,9 +264,7 @@ impl Link {
         // them.
         let mut transport = live.transport.lock().unwrap();
         for piece in split_app_message(message) {
-            if let Ok(sealed) = seal_transport_message(&mut transport, &piece) {
-                live.conn.send(Msg::Binary(sealed));
-            }
+            send_sealed(&live.conn, &mut transport, &piece);
         }
         Ok(())
     }

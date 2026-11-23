@@ -13,11 +13,11 @@ use crate::conn::{self, Conn, Msg};
 use crate::device::Inner;
 use crate::errors::{CandidateFailure, DialError, RefusedBy};
 use crate::hub_socket::{HubSocket, Identity, Join, Shared};
-use crate::link::{LinkCloseCause, LiveLink, NewLink, Role};
+use crate::link::{LinkCloseCause, LiveLink, NewLink, Role, send_sealed};
 use crate::wire::ids::new_connection_id;
 use crate::wire::link::{
     CLOSE_GOING_AWAY, CLOSE_PROTOCOL_ERROR, Hello, RACE_TIMEOUT_MS, Refuse, TransportMessage, finish_handshake,
-    open_transport_message, seal_transport_message, start_handshake,
+    open_transport_message, start_handshake,
 };
 use crate::wire::noise::Transport;
 use crate::wire::relay::{Candidate, ConnectInfoInput, ConnectInfoResult};
@@ -42,10 +42,7 @@ async fn shake(
         .map_err(|_| failure(&candidate, None, "the handshake failed"))?;
     conn.send(Msg::Binary(first));
     let second = conn.receive().await.map_err(|close| failure(&candidate, Some(close.code), close.reason))?;
-    let transport = match second {
-        Msg::Binary(second) => finish_handshake(&mut handshake, &second),
-        Msg::Text(_) => None,
-    };
+    let transport = second.as_binary().and_then(|second| finish_handshake(&mut handshake, second));
     let transport = transport.ok_or_else(|| failure(&candidate, None, "the handshake failed"))?;
     Ok((conn, transport))
 }
@@ -74,6 +71,11 @@ pub(crate) async fn dial(
     };
     let peer = shared.peer(device_id).ok_or(DialError::Offline)?;
 
+    let hello = TransportMessage::Hello(Hello {
+        device_id: identity.device_id.clone(),
+        connection_id: connection_id.clone(),
+        app_hello,
+    });
     let mut refusal: Option<DialError> = None;
     let mut failures: Vec<CandidateFailure> = Vec::new();
     let race = async {
@@ -94,17 +96,9 @@ pub(crate) async fn dial(
                     continue;
                 }
             };
-            let hello = TransportMessage::Hello(Hello {
-                device_id: identity.device_id.clone(),
-                connection_id: connection_id.clone(),
-                app_hello: app_hello.clone(),
-            });
-            if let Ok(sealed) = seal_transport_message(&mut transport, &hello) {
-                conn.send(Msg::Binary(sealed));
-            }
+            send_sealed(&conn, &mut transport, &hello);
             let answer = match conn.receive().await {
-                Ok(Msg::Binary(bytes)) => open_transport_message(&mut transport, &bytes),
-                Ok(Msg::Text(_)) => None,
+                Ok(message) => message.as_binary().and_then(|bytes| open_transport_message(&mut transport, bytes)),
                 Err(close) => {
                     failures.push(failure(candidate, Some(close.code), close.reason));
                     continue;
