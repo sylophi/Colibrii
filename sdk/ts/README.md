@@ -118,8 +118,11 @@ back: its links stay up, and an app holds back saying it went offline.
 A device removed from the account, by another device or past the
 account's cap, reads as `SignedOut` with `removed: true` and forgets
 its credential, until it enrolls again or the app signs it out, which
-is how an app says it has acted on the removal. A device stops when another copy of a `single` device
-connects (`superseded`), when its credential was replaced
+is how an app says it has acted on the removal. The store keeps that
+it was removed, so a run made later on it reads the same, and an app
+that quit before it acted on a removal meets it again on its next
+start. A device stops when another copy of a `single` device connects
+(`superseded`), when its credential was replaced
 (`credential-rejected`) or when the service wants a newer SDK
 (`update-required`). It stays stopped until it enrolls again.
 
@@ -320,12 +323,12 @@ const program = Effect.gen(function* () {
 A tab follows the others through the `storage` event: one tab's
 enrollment connects every open tab, and a sign-out or a removal signs
 them all out. Each tab tries a removal still owed, one at a time, and
-the first the service answers clears it for all. Each tab reads `removed` as it learned of it: a tab that
-heard of another tab's sign-out before its own socket closed reads
-`removed: false`. Tabs enroll and sign out one at a time, under a lock
-named after the key (`navigator.locks`), and a tab that waited behind
-another's enrollment runs that one instead of enrolling again. Any
-script on the page's origin can read the entry.
+the first the service answers clears it for all. A removal reads as
+`removed: true` in every tab, one opened after it included, until one
+of them enrolls or signs out. Tabs enroll and sign out one at a time,
+under a lock named after the key (`navigator.locks`), and a tab that
+waited behind another's enrollment runs that one instead of enrolling
+again. Any script on the page's origin can read the entry.
 
 A page does not listen, so a peer dialing it fails with `no-listener`.
 It dials only a peer's tunnel (`wss://`), since a page served over

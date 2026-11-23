@@ -329,10 +329,18 @@ included. A device enrolling its old device id under another account
 meets `DeviceEnrolledElsewhere` until then, and enrolls again once the
 `DELETE` goes through.
 
+A device that learns it was removed, from `DeviceRevoked` or a hub
+socket closed with 4102, forgets its credential and key and keeps only
+that it was removed. It reads as removed from then on, in every run
+that shares what it keeps, until its person signs in again or the app
+signs it out. An app may sign its person in by itself while it holds a
+sign-in, so a removal it had not yet acted on when it last quit would
+otherwise put the device back on the account.
+
 The tabs of one browser profile are one `multi` device and share what it
 keeps. One tab enrolls at a time, and the others take up the enrollment
 it stored. A tab that finds the stored credential gone, or kept only to
-sign out, reads as signed out.
+sign out, reads as signed out, and as removed when the device was.
 
 ## What an instance is set up with
 
