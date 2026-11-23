@@ -198,7 +198,9 @@ impl CodeSignIn {
             verification_uri_complete: code.verification_uri_complete,
             device_code: code.device_code,
             interval: seconds(code.interval.unwrap_or(DEFAULT_INTERVAL_SECONDS))?,
-            expires_at: asked_at + seconds(code.expires_in)?,
+            expires_at: asked_at
+                .checked_add(seconds(code.expires_in)?)
+                .ok_or_else(|| unreachable("a code that outlives time"))?,
         })
     }
 

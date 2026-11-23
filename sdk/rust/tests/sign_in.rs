@@ -222,3 +222,29 @@ async fn trades_an_access_token_for_a_sign_in_token_only_where_the_app_mints_the
     let rejected = sign_in_token(&hub(), "quill", &session).await;
     assert_eq!(rejected, Err(Error::Service(ServiceError::LoginRejected)));
 }
+
+#[tokio::test]
+async fn refuses_a_code_whose_life_runs_past_the_end_of_time() {
+    let origin = http_stub(|request| match request.path.as_str() {
+        "/device" => (
+            200,
+            json!({
+                "device_code": "device-code",
+                "user_code": "ABCD-EFGH",
+                "verification_uri": "https://clerk.test/verify",
+                "expires_in": 1e19,
+            })
+            .to_string(),
+        ),
+        _ => (
+            200,
+            json!({
+                "token_endpoint": "https://clerk.test/token",
+                "device_authorization_endpoint": "https://clerk.test/device",
+            })
+            .to_string(),
+        ),
+    })
+    .await;
+    assert!(matches!(sign_in_with(&origin).start().await, Err(CodeSignInError::Unreachable(_))));
+}
