@@ -107,12 +107,14 @@ impl ConnectInfoInput {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct Candidate {
     pub kind: CandidateKind,
     pub url: String,
     pub ticket: String,
 }
+
+debug_without_secrets!(Candidate { kind, url });
 
 fn is_octet(text: &str) -> bool {
     !text.is_empty()

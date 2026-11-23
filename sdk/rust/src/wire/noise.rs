@@ -57,11 +57,7 @@ pub struct KeyPair {
     pub private_key: [u8; 32],
 }
 
-impl std::fmt::Debug for KeyPair {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KeyPair").field("public_key", &self.public_key).finish_non_exhaustive()
-    }
-}
+debug_without_secrets!(KeyPair { public_key });
 
 // ---- Section 4.1: DH functions ----
 

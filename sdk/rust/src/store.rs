@@ -91,10 +91,12 @@ impl CredentialStore for FileStore {
 }
 
 /// The document in memory, for a device that keeps nothing between runs.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct MemoryStore {
     text: Mutex<Option<String>>,
 }
+
+debug_without_secrets!(MemoryStore {});
 
 impl MemoryStore {
     pub fn new() -> MemoryStore {
@@ -120,7 +122,7 @@ impl CredentialStore for MemoryStore {
 
 // ---- The document ----
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Enrollment {
     pub device_id: String,
     pub account_id: String,
@@ -131,13 +133,17 @@ pub(crate) struct Enrollment {
     pub port: Option<u16>,
 }
 
+debug_without_secrets!(Enrollment { device_id, account_id, port });
+
 /// Signed out before the service heard of it: the device removes itself
 /// with the credential once it can.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Owed {
     pub device_id: String,
     pub credential: String,
 }
+
+debug_without_secrets!(Owed { device_id });
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Stored {

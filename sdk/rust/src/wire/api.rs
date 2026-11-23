@@ -24,13 +24,15 @@ pub struct EnrollRequest {
     pub data: Option<Map<String, Value>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnrollResponse {
     pub credential: String,
     pub account_id: String,
     pub device: DeviceRecord,
 }
+
+debug_without_secrets!(EnrollResponse { account_id, device });
 
 impl EnrollResponse {
     pub fn decode(value: &Value) -> Option<EnrollResponse> {
@@ -48,10 +50,12 @@ pub struct SignInTokenRequest {
     pub app: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignInTokenResponse {
     pub token: String,
 }
+
+debug_without_secrets!(SignInTokenResponse {});
 
 /// A device leaves out an entry it cannot read.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -80,23 +84,27 @@ pub struct TicketRequest {
     pub connection_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketResponse {
     pub ticket: String,
 }
+
+debug_without_secrets!(TicketResponse {});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TunnelRequest {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelResponse {
     pub hostname: String,
     pub connector_token: String,
     pub fresh: bool,
 }
+
+debug_without_secrets!(TunnelResponse { hostname, fresh });
 
 /// An error the service answers with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

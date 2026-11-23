@@ -55,7 +55,7 @@ impl fmt::Display for CodeSignInError {
 impl std::error::Error for CodeSignInError {}
 
 /// What to show the person, and what finishing needs.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct SignInCode {
     pub user_code: String,
     pub verification_uri: String,
@@ -65,6 +65,8 @@ pub struct SignInCode {
     pub interval: Duration,
     pub expires_at: SystemTime,
 }
+
+debug_without_secrets!(SignInCode { user_code, verification_uri, verification_uri_complete, interval, expires_at });
 
 /// The app's Clerk instance and OAuth client.
 #[derive(Clone)]
