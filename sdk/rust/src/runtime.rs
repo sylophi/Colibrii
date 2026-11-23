@@ -34,10 +34,6 @@ impl Runtime {
         Ok(Runtime { handle, owned: Mutex::new(Some((stop, thread))) })
     }
 
-    pub fn handle(&self) -> &Handle {
-        &self.handle
-    }
-
     /// Runs `future` on the device's runtime, from wherever it is awaited.
     /// Dropping what this returns stops it.
     pub fn run<F>(&self, future: F) -> Task<F::Output>

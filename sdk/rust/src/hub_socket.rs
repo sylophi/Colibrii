@@ -19,9 +19,11 @@ use crate::conn::{self, Conn, Msg};
 use crate::device::{Inner, Peer, Stop};
 use crate::errors::{DialError, Error};
 use crate::hub_api::{self, stop_of_error};
+use crate::link::{LinkCloseCause, LiveLink, Role};
 use crate::liveness::{self, Heard};
 use crate::wire::api::{TicketRequest, TicketResponse};
-use crate::wire::hub::{CLOSE_DEVICE_REMOVED, CLOSE_SUPERSEDED, PING, PONG, ServiceMessage, encode_relay};
+use crate::wire::hub::{CLOSE_DEVICE_REMOVED, CLOSE_SUPERSEDED, Connections, PING, PONG, ServiceMessage, encode_relay};
+use crate::wire::link::CLOSE_GOING_AWAY;
 use crate::wire::link::{REDIAL_DELAYS_MS, REDIAL_RESET_AFTER_MS};
 use crate::wire::noise::{HandshakeState, KeyPair};
 use crate::wire::relay::{
@@ -52,6 +54,121 @@ pub(crate) struct Roster {
 impl Roster {
     pub fn get(&self, device_id: &str) -> Option<&Peer> {
         self.peers.iter().find(|peer| peer.device_id == device_id)
+    }
+}
+
+/// What the session's parts share: the roster, and the links that joined
+/// it.
+pub(crate) struct Shared {
+    /// Set by the hub socket: none while it is down.
+    pub roster: watch::Sender<Option<Roster>>,
+    links: Mutex<Links>,
+    pub tasks: TaskTracker,
+    pub ended: CancellationToken,
+}
+
+#[derive(Default)]
+struct Links {
+    ended: bool,
+    all: Vec<Arc<LiveLink>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Join {
+    Joined,
+    /// The session ended, or its roster is unknown.
+    Unavailable,
+    /// The roster does not name the link's peer with the key it proved.
+    Refused,
+}
+
+impl Shared {
+    pub fn new() -> Arc<Shared> {
+        Arc::new(Shared {
+            roster: watch::channel(None).0,
+            links: Mutex::new(Links::default()),
+            tasks: TaskTracker::new(),
+            ended: CancellationToken::new(),
+        })
+    }
+
+    /// Runs `work` until the session ends.
+    pub fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) {
+        spawn_until(&self.tasks, &self.ended, work);
+    }
+
+    pub fn roster(&self) -> Option<Roster> {
+        self.roster.borrow().clone()
+    }
+
+    /// The peer as the latest roster names it, while the hub socket is up.
+    pub fn peer(&self, device_id: &str) -> Option<Peer> {
+        self.roster.borrow().as_ref().and_then(|roster| roster.get(device_id).cloned())
+    }
+
+    /// A link joins only while the session runs and the roster names its
+    /// peer with the key the link proved, checked in the same step, so the
+    /// sweep and the session's end see every link that joined. A dialer
+    /// chose its peer from the roster moments ago, so it leaves one missing
+    /// from a roster not yet settled to the sweep, as it does an older
+    /// link.
+    pub fn join(&self, link: &Arc<LiveLink>) -> Join {
+        let mut links = self.links.lock().unwrap();
+        let roster = self.roster.borrow();
+        let Some(roster) = roster.as_ref().filter(|_| !links.ended) else { return Join::Unavailable };
+        let named = match roster.get(&link.device_id) {
+            None => link.role == Role::Dialer && !roster.settled,
+            Some(peer) => same_key(&peer.public_key, &link.peer_key),
+        };
+        if !named {
+            return Join::Refused;
+        }
+        links.all.retain(|other| !other.is_ended());
+        links.all.push(link.clone());
+        Join::Joined
+    }
+
+    /// Ends the links a new one from the same peer replaces: every other
+    /// one this device listened for when the peer is `single`, or the one
+    /// with the same connection id when it is `multi`.
+    pub fn replace(&self, link: &Arc<LiveLink>, connections: Connections) {
+        let others: Vec<_> = self.links.lock().unwrap().all.clone();
+        for other in others {
+            if !Arc::ptr_eq(&other, link)
+                && other.role == Role::Listener
+                && other.device_id == link.device_id
+                && (connections == Connections::Single || other.connection_id == link.connection_id)
+            {
+                other.end(CLOSE_GOING_AWAY, LinkCloseCause::Replaced);
+            }
+        }
+    }
+
+    /// A live roster ends the links of a peer that left it, once settled,
+    /// or that it gives another key.
+    pub fn sweep(&self, roster: &Roster) {
+        let links: Vec<_> = self.links.lock().unwrap().all.clone();
+        for link in links {
+            let gone = match roster.get(&link.device_id) {
+                None => roster.settled,
+                Some(peer) => !same_key(&peer.public_key, &link.peer_key),
+            };
+            if gone {
+                link.end(CLOSE_GOING_AWAY, LinkCloseCause::LeftRoster);
+            }
+        }
+    }
+
+    /// The session ends: no link joins from now on, and every link closes.
+    pub fn end_links(&self) {
+        let links = {
+            let mut links = self.links.lock().unwrap();
+            links.ended = true;
+            std::mem::take(&mut links.all)
+        };
+        for link in links {
+            link.end(CLOSE_GOING_AWAY, LinkCloseCause::Stopped);
+        }
     }
 }
 
@@ -91,10 +208,8 @@ impl Live {
 
 pub(crate) struct HubSocket {
     inner: Arc<Inner>,
-    tasks: TaskTracker,
+    shared: Arc<Shared>,
     identity: Arc<Identity>,
-    /// Set by the socket: none while it is down.
-    pub roster: watch::Sender<Option<Roster>>,
     live: Mutex<Option<Arc<Live>>>,
     answer: AnswerFn,
     /// The asks this device opened, by handshake hash, each until its
@@ -181,17 +296,16 @@ impl Drop for AttemptEnd {
         }
         drop(live);
         self.live.fail(|_| true, DialError::NotConnected);
-        self.hub.roster.send_replace(None);
+        self.hub.shared.roster.send_replace(None);
     }
 }
 
 impl HubSocket {
-    pub fn new(inner: Arc<Inner>, tasks: TaskTracker, identity: Arc<Identity>, answer: AnswerFn) -> Arc<HubSocket> {
+    pub fn new(inner: Arc<Inner>, shared: Arc<Shared>, identity: Arc<Identity>, answer: AnswerFn) -> Arc<HubSocket> {
         Arc::new(HubSocket {
             inner,
-            tasks,
+            shared,
             identity,
-            roster: watch::channel(None).0,
             live: Mutex::new(None),
             answer,
             seen_asks: Mutex::new(HashMap::new()),
@@ -274,7 +388,7 @@ impl HubSocket {
 
         let hub = self.clone();
         let (receiving, heard_by_receiver, ended_by_receiver) = (current.clone(), heard.clone(), ended.clone());
-        spawn_until(&self.tasks, &ended, async move {
+        spawn_until(&self.shared.tasks, &ended, async move {
             while let Ok(message) = receiving.conn.receive().await {
                 heard_by_receiver.hear();
                 if let Msg::Text(text) = message {
@@ -293,10 +407,10 @@ impl HubSocket {
         if let Some(code) = first {
             return stop_of(code).map_or(failed(Duration::ZERO), Err);
         }
-        let roster = self.roster.clone();
-        spawn_until(&self.tasks, &ended, async move {
+        let shared = self.shared.clone();
+        spawn_until(&self.shared.tasks, &ended, async move {
             sleep(SETTLE).await;
-            roster.send_modify(|now| {
+            shared.roster.send_modify(|now| {
                 if let Some(now) = now {
                     now.settled = true;
                 }
@@ -333,7 +447,7 @@ impl HubSocket {
                 current.fail(|entry| !peers.iter().any(|peer| peer.device_id == entry.device_id), DialError::Offline);
                 // Asks go out on it from the first presence, which admits it.
                 *self.live.lock().unwrap() = Some(current.clone());
-                self.roster.send_modify(|before| {
+                self.shared.roster.send_modify(|before| {
                     let settled = before.as_ref().is_some_and(|then| then.settled);
                     *before = Some(Roster { peers, settled });
                 });
@@ -354,7 +468,7 @@ impl HubSocket {
                     // Answered apart, since an answer may wait on the tunnel.
                     FrameKind::Ask => {
                         let (hub, conn) = (self.clone(), current.conn.clone());
-                        spawn_until(&self.tasks, ended, async move { hub.answer_ask(&conn, from, frame).await });
+                        spawn_until(&self.shared.tasks, ended, async move { hub.answer_ask(&conn, from, frame).await });
                     }
                 }
             }
@@ -362,7 +476,7 @@ impl HubSocket {
     }
 
     async fn answer_ask(&self, conn: &Conn, from: String, frame: RelayFrame) {
-        let Some(peer_key) = self.peer(&from).map(|peer| peer.public_key) else { return };
+        let Some(peer_key) = self.shared.peer(&from).map(|peer| peer.public_key) else { return };
         let identity = &self.identity;
         let Some(mut opened) = open_ask(&from, &identity.device_id, &identity.key, &frame.sealed, None) else {
             return;
@@ -387,16 +501,11 @@ impl HubSocket {
         conn.send(Msg::Text(encode_relay(&from, &frame)));
     }
 
-    /// The peer as the latest roster names it, while the socket is up.
-    pub fn peer(&self, device_id: &str) -> Option<Peer> {
-        self.roster.borrow().as_ref().and_then(|roster| roster.get(device_id).cloned())
-    }
-
     /// The asker's side: the peer's connectInfo result, or why there is
     /// none.
     pub async fn ask(&self, device_id: &str, input: ConnectInfoInput) -> Result<ConnectInfoResult, DialError> {
         let current = self.live.lock().unwrap().clone().ok_or(DialError::NotConnected)?;
-        let peer = self.peer(device_id).ok_or(DialError::Offline)?;
+        let peer = self.shared.peer(device_id).ok_or(DialError::Offline)?;
         let id = current.next_id.fetch_add(1, Ordering::SeqCst).to_string();
         let identity = &self.identity;
         let (sealed, handshake) =

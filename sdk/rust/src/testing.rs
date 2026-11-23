@@ -12,7 +12,7 @@ pub trait Hooks: Send + Sync + 'static {
         None
     }
 
-    /// Headers added to every request and every socket this device opens.
+    /// Headers added to every HTTP request this device makes.
     fn headers(&self) -> Vec<(String, String)> {
         Vec::new()
     }

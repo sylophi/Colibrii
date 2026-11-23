@@ -11,7 +11,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -76,19 +75,10 @@ impl Conn {
     }
 
     /// A socket accepted by a listener, past its upgrade.
-    pub async fn accepted<S>(stream: S, max_message_bytes: usize, tasks: &TaskTracker) -> Conn
+    pub fn accepted<S>(ws: WebSocketStream<S>, tasks: &TaskTracker) -> Conn
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let config = WebSocketConfig::default()
-            .max_message_size(Some(max_message_bytes))
-            .max_frame_size(Some(max_message_bytes));
-        let ws = WebSocketStream::from_raw_socket(
-            stream,
-            tokio_tungstenite::tungstenite::protocol::Role::Server,
-            Some(config),
-        )
-        .await;
         Conn::start(ws, false, tasks)
     }
 
@@ -235,14 +225,7 @@ pub(crate) async fn open(url: &str, hooks: &Arc<dyn Hooks>, tasks: &TaskTracker)
     if !hooks.open(url) {
         return Err(refused("refused by the test".into()));
     }
-    let mut request = url.into_client_request().map_err(|error| refused(error.to_string()))?;
-    for (name, value) in hooks.headers() {
-        if let (Ok(name), Ok(value)) =
-            (name.parse::<tokio_tungstenite::tungstenite::http::HeaderName>(), HeaderValue::from_str(&value))
-        {
-            request.headers_mut().insert(name, value);
-        }
-    }
+    let request = url.into_client_request().map_err(|error| refused(error.to_string()))?;
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_SERVICE_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_SERVICE_MESSAGE_BYTES));

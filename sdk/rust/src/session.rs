@@ -1,36 +1,38 @@
-//! What runs while the device is enrolled: the hub socket, and the peers
-//! and account state that follow its roster.
+//! What runs while the device is enrolled: the listener, the hub socket,
+//! and the peers, links and account state that follow its roster.
 
 use std::sync::Arc;
 
-use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
-
+use crate::Link;
 use crate::device::{AccountState, Inner};
-use crate::errors::Error;
-use crate::hub_socket::{AnswerFn, HubSocket, Identity, spawn_until};
-use crate::store::Enrollment;
+use crate::errors::{DialError, Error};
+use crate::hub_socket::{AnswerFn, HubSocket, Identity, Shared};
+use crate::listener::Listener;
+use crate::store::{Enrollment, Stored};
 use crate::wire::noise::KeyPair;
 use crate::wire::relay::{Answer, ConnectInfoInput};
 
 pub(crate) struct Session {
-    pub identity: Arc<Identity>,
-    pub hub: Arc<HubSocket>,
+    identity: Arc<Identity>,
+    hub: Arc<HubSocket>,
+    shared: Arc<Shared>,
     inner: Arc<Inner>,
-    ended: CancellationToken,
-    tasks: TaskTracker,
 }
 
-fn answer_for() -> AnswerFn {
-    Arc::new(|_from, ask| {
+fn answer_for(listener: Option<Arc<Listener>>) -> AnswerFn {
+    Arc::new(move |from, ask| {
+        let listener = listener.clone();
         Box::pin(async move {
             if ask.ask != "connectInfo" {
                 return Answer::Refused("unknown-ask".into());
             }
-            if ask.input.as_ref().and_then(ConnectInfoInput::decode).is_none() {
+            let Some(input) = ask.input.as_ref().and_then(ConnectInfoInput::decode) else {
                 return Answer::Refused("bad-input".into());
+            };
+            match listener {
+                None => Answer::Refused("no-listener".into()),
+                Some(listener) => Answer::Ok(listener.connect_info(&from, &input).await),
             }
-            Answer::Refused("no-listener".into())
         })
     })
 }
@@ -42,17 +44,43 @@ impl Session {
             credential: stored.credential.clone(),
             key: KeyPair::from_private_key(stored.private_key),
         });
-        let tasks = TaskTracker::new();
-        let ended = CancellationToken::new();
-        let hub = HubSocket::new(inner.clone(), tasks.clone(), identity.clone(), answer_for());
-        let session = Arc::new(Session { identity, hub: hub.clone(), inner: inner.clone(), ended, tasks });
+        let shared = Shared::new();
+        let listener = match &inner.options.listen {
+            None => None,
+            Some(listen) => {
+                let started =
+                    Listener::start(inner.clone(), identity.clone(), shared.clone(), listen, stored.port.unwrap_or(0))
+                        .await;
+                let listener = match started {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        shared.ended.cancel();
+                        return Err(Error::Listen(error.to_string()));
+                    }
+                };
+                if Some(listener.port) != stored.port {
+                    let current = inner.state.lock().unwrap().enrollment.clone();
+                    if let Some(mut current) = current.filter(|current| current.credential == stored.credential) {
+                        current.port = Some(listener.port);
+                        inner.state.lock().unwrap().enrollment = Some(current.clone());
+                        inner.write_stored(Stored::Enrollment(current)).await?;
+                    }
+                }
+                Some(listener)
+            }
+        };
+        let hub = HubSocket::new(inner.clone(), shared.clone(), identity.clone(), answer_for(listener));
+        let session = Arc::new(Session { identity, hub: hub.clone(), shared: shared.clone(), inner: inner.clone() });
 
-        let mut roster = hub.roster.subscribe();
-        let following = inner.clone();
+        let mut roster = shared.roster.subscribe();
+        let (following, sweeping) = (inner.clone(), shared.clone());
         let device_id = stored.device_id.clone();
-        spawn_until(&session.tasks, &session.ended, async move {
+        shared.spawn(async move {
             loop {
                 let now = roster.borrow_and_update().clone();
+                if let Some(now) = &now {
+                    sweeping.sweep(now);
+                }
                 following.peers.send_replace(now.as_ref().map(|now| now.peers.clone()).unwrap_or_default());
                 following.account.send_modify(|state| {
                     if let AccountState::Enrolled { device_id: enrolled, connected, settled, .. } = state
@@ -70,7 +98,7 @@ impl Session {
 
         let credential = stored.credential;
         let settling = inner.clone();
-        spawn_until(&session.tasks, &session.ended, async move {
+        shared.spawn(async move {
             let stop = hub.run().await;
             // Apart from this session, which settling ends.
             let device = settling.clone();
@@ -79,10 +107,19 @@ impl Session {
         Ok(session)
     }
 
+    pub async fn dial(&self, device_id: &str, app_hello: Vec<u8>) -> Result<Link, DialError> {
+        let dialing = crate::dial::dial(&self.inner, &self.hub, &self.shared, &self.identity, device_id, app_hello);
+        tokio::select! {
+            dialed = dialing => dialed,
+            _ = self.shared.ended.cancelled() => Err(DialError::NotConnected),
+        }
+    }
+
     pub async fn end(&self) {
-        self.ended.cancel();
-        self.tasks.close();
-        self.tasks.wait().await;
+        self.shared.end_links();
+        self.shared.ended.cancel();
+        self.shared.tasks.close();
+        self.shared.tasks.wait().await;
         self.inner.peers.send_replace(Vec::new());
     }
 }

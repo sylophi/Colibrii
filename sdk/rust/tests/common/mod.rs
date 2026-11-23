@@ -277,3 +277,50 @@ pub async fn listed(device: &Device) -> Vec<String> {
 pub fn document(store: &MemoryStore) -> Option<Value> {
     store.read().unwrap().map(|text| serde_json::from_str(&text).unwrap())
 }
+
+// ---- Links ----
+
+pub fn listening(kit: &Kit) -> Options {
+    kit.options().listen(colibrii::Listen::new())
+}
+
+/// Each hello the device hears, decided by `decide` in a task of its own,
+/// and the links it welcomed.
+pub fn serve<F, Fut>(device: &Device, decide: F) -> tokio::sync::mpsc::UnboundedReceiver<colibrii::Link>
+where
+    F: Fn(colibrii::IncomingHello) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Option<colibrii::Link>> + Send + 'static,
+{
+    let (links, received) = tokio::sync::mpsc::unbounded_channel();
+    let incoming = device.incoming();
+    let decide = Arc::new(decide);
+    tokio::spawn(async move {
+        while let Some(hello) = incoming.next().await {
+            let (decide, links) = (decide.clone(), links.clone());
+            tokio::spawn(async move {
+                if let Some(link) = decide(hello).await {
+                    let _ = links.send(link);
+                }
+            });
+        }
+    });
+    received
+}
+
+/// Welcomes every hello with "welcome " and its app hello.
+pub fn welcome_all(device: &Device) -> tokio::sync::mpsc::UnboundedReceiver<colibrii::Link> {
+    serve(device, |hello| async move {
+        let mut welcome = b"welcome ".to_vec();
+        welcome.extend_from_slice(&hello.app_hello);
+        hello.welcome(welcome).await
+    })
+}
+
+pub async fn next_link(links: &mut tokio::sync::mpsc::UnboundedReceiver<colibrii::Link>) -> colibrii::Link {
+    tokio::time::timeout(WAIT, links.recv()).await.expect("in time").expect("a link")
+}
+
+/// Until `device`'s roster names `peer`.
+pub async fn sees(device: &Device, peer: &str) {
+    wait_for(&device.roster(), |peers| peers.iter().any(|entry| entry.device_id == peer)).await;
+}

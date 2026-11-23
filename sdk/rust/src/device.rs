@@ -6,12 +6,14 @@ use std::sync::{Arc, Mutex};
 
 use reqwest::Method;
 use serde_json::{Map, Value};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::errors::{Error, InvalidInput, StoreOperation};
+use crate::Link;
+use crate::errors::{DialError, Error, InvalidInput, StoreOperation};
 use crate::hub_api::{self, HubApi};
+use crate::listener::{IncomingHello, Listen};
 use crate::runtime::Runtime;
 use crate::session::Session;
 use crate::store::{CredentialStore, Enrollment, Owed, Stored};
@@ -21,6 +23,7 @@ use crate::wire::api::{DeviceList, DevicePatch, EnrollRequest, EnrollResponse, S
 use crate::wire::base64url;
 use crate::wire::hub::{Connections, DeviceRecord, is_device_data, is_device_name};
 use crate::wire::ids::{is_device_id, new_connection_id, new_device_id};
+use crate::wire::link::MAX_APP_BYTES;
 use crate::wire::noise::KeyPair;
 
 /// Why a device stopped, until the person acts.
@@ -104,6 +107,7 @@ pub struct Options {
     pub(crate) connections: Connections,
     pub(crate) store: Arc<dyn CredentialStore>,
     pub(crate) device_id: Option<String>,
+    pub(crate) listen: Option<Listen>,
     pub(crate) runtime: Option<tokio::runtime::Handle>,
     pub(crate) hooks: Arc<dyn Hooks>,
 }
@@ -123,6 +127,7 @@ impl Options {
             connections,
             store,
             device_id: None,
+            listen: None,
             runtime: None,
             hooks: testing::none(),
         }
@@ -134,6 +139,14 @@ impl Options {
     /// signed out.
     pub fn device_id(mut self, device_id: impl Into<String>) -> Options {
         self.device_id = Some(device_id.into());
+        self
+    }
+
+    /// Listens for links from the person's other devices, which arrive
+    /// through [`Device::incoming`]. A device that does not listen tells a
+    /// peer asking so.
+    pub fn listen(mut self, listen: Listen) -> Options {
+        self.listen = Some(listen);
         self
     }
 
@@ -173,6 +186,8 @@ pub(crate) struct Inner {
     pub closing: CancellationToken,
     /// Every task of the device's, which closing waits for.
     pub tasks: TaskTracker,
+    /// The hellos for the app to decide on.
+    pub incoming: (mpsc::UnboundedSender<IncomingHello>, tokio::sync::Mutex<mpsc::UnboundedReceiver<IncomingHello>>),
 }
 
 /// One install of one app: enrolled under the person's account, it keeps
@@ -210,6 +225,10 @@ impl Device {
             connection_id: new_connection_id(),
             closing: CancellationToken::new(),
             tasks: TaskTracker::new(),
+            incoming: {
+                let (sender, receiver) = mpsc::unbounded_channel();
+                (sender, tokio::sync::Mutex::new(receiver))
+            },
         });
         let started = runtime.run(inner.clone().start_up()).await;
         let device = Device { inner, runtime, closed: false };
@@ -256,6 +275,23 @@ impl Device {
         self.runtime.run(async move { inner.sign_out().await }).await
     }
 
+    /// Dials a peer: the link, once its app welcomed the app hello, of at
+    /// most 16 KiB.
+    pub async fn dial(&self, device_id: &str, app_hello: &[u8]) -> Result<Link, DialError> {
+        if app_hello.len() > MAX_APP_BYTES {
+            return Err(DialError::InvalidInput(InvalidInput::AppHello));
+        }
+        let session = self.inner.state.lock().unwrap().session.clone().ok_or(DialError::NotConnected)?;
+        let (device_id, app_hello) = (device_id.to_owned(), app_hello.to_vec());
+        self.runtime.run(async move { session.dial(&device_id, app_hello).await }).await
+    }
+
+    /// The hellos of peers dialing this device, for the app to welcome or
+    /// refuse, while it listens.
+    pub fn incoming(&self) -> Incoming {
+        Incoming { inner: self.inner.clone() }
+    }
+
     /// The account's device list.
     pub fn devices(&self) -> Devices<'_> {
         Devices { device: self }
@@ -284,14 +320,6 @@ impl Device {
         self.runtime.run(async move { inner.shut_down().await }).await;
         self.runtime.stop();
     }
-
-    pub(crate) fn inner(&self) -> &Arc<Inner> {
-        &self.inner
-    }
-
-    pub(crate) fn runtime(&self) -> &Arc<Runtime> {
-        &self.runtime
-    }
 }
 
 impl Drop for Device {
@@ -304,6 +332,21 @@ impl Drop for Device {
             inner.shut_down().await;
             runtime.stop();
         });
+    }
+}
+
+/// The hellos of peers dialing the device. It ends once the device closes.
+pub struct Incoming {
+    inner: Arc<Inner>,
+}
+
+impl Incoming {
+    pub async fn next(&self) -> Option<IncomingHello> {
+        let mut receiver = self.inner.incoming.1.lock().await;
+        tokio::select! {
+            hello = receiver.recv() => hello,
+            _ = self.inner.closing.cancelled() => None,
+        }
     }
 }
 
