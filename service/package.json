@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler d1 migrations apply DB --local && node scripts/dev.ts",
+    "app": "node scripts/app.ts",
     "deploy": "wrangler d1 migrations apply DB --remote -c instance.jsonc && wrangler deploy -c instance.jsonc",
     "typecheck": "$(effect-tsgo get-exe-path) && $(effect-tsgo get-exe-path) -p test",
     "test": "vitest run"

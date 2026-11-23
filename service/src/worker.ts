@@ -138,9 +138,16 @@ const handlers = Effect.gen(function* () {
   const instance = yield* Instance;
   const registry = yield* Registry.Registry;
 
-  const loginFor = Effect.fnUntraced(function* (appId: string) {
-    const app = instance.apps.get(appId);
-    if (app === undefined) return yield* new UnknownAppError({ app: appId });
+  // The app is read on each request, so one the owner adds, changes or
+  // removes counts from the next.
+  const loginFor = Effect.fnUntraced(function* (
+    appId: string,
+    operation: "enroll" | "sign-in-token",
+  ) {
+    const app = yield* registry
+      .app(appId)
+      .pipe(Effect.catchTags({ RegistryError: unavailable(operation) }));
+    if (app === null) return yield* new UnknownAppError({ app: appId });
     const token = Redacted.value(yield* LoginToken);
     const login = yield* Effect.promise(() => verifyLogin(token, app));
     if (login === null) return yield* new LoginRejectedError();
@@ -161,7 +168,7 @@ const handlers = Effect.gen(function* () {
     handle
       .handle("enroll", ({ payload }) =>
         Effect.gen(function* () {
-          const { app, login } = yield* loginFor(payload.app);
+          const { app, login } = yield* loginFor(payload.app, "enroll");
           const account = { appId: app.id, accountId: login.accountId };
           const credential = DEVICE_CREDENTIAL_PREFIX + Base64Url.random(32);
           const hash = yield* Effect.promise(() => credentialHash(credential));
@@ -197,11 +204,21 @@ const handlers = Effect.gen(function* () {
       )
       .handle("signInToken", ({ payload }) =>
         Effect.gen(function* () {
-          const { app, login } = yield* loginFor(payload.app);
+          const { app, login } = yield* loginFor(payload.app, "sign-in-token");
           // Whoever holds a session token has a session already.
           if (!login.oauth) return yield* new LoginRejectedError();
-          const secretKey = app.clerkSecretKey;
-          if (secretKey === undefined) return yield* new SignInTokensOffError();
+          const secretName = app.clerkSecretName;
+          if (secretName === undefined) {
+            return yield* new SignInTokensOffError();
+          }
+          const secretKey = env[secretName];
+          if (typeof secretKey !== "string" || secretKey === "") {
+            return yield* Effect.die(
+              new Error(
+                `the secret ${secretName} that app ${app.id} names is not set`,
+              ),
+            );
+          }
           const token = yield* attempt("sign-in-token", () =>
             mintSignInToken(secretKey, login.accountId),
           );

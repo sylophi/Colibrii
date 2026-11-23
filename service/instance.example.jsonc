@@ -47,22 +47,5 @@
     "TUNNEL_DOMAIN": "example.link",
     "TUNNEL_ZONE_ID": "<the tunnel zone's id>",
     "CLOUDFLARE_ACCOUNT_ID": "<Cloudflare account id>",
-    "APPS": [
-      {
-        "id": "inkwell",
-        // The Clerk instance's PEM public key, on one line with \n for
-        // each line break.
-        "clerkPublicKey": "-----BEGIN PUBLIC KEY-----\n<…>\n-----END PUBLIC KEY-----",
-        // The origins its Clerk session tokens come from.
-        "origins": ["inkwell://app", "https://app.inkwell.example"],
-        // Only for an app that signs in through OAuth or with a code.
-        "oauthClientId": "<Clerk OAuth application's client id>",
-        // Only for an app that has the service mint sign-in tokens: the
-        // name of the Worker secret that holds its Clerk secret key.
-        "clerkSecretName": "INKWELL_CLERK_SECRET_KEY",
-        // Only to change it from 16.
-        "deviceCap": 16,
-      },
-    ],
   },
 }

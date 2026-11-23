@@ -1,6 +1,7 @@
-// For local development and the tests only, which give it its apps
-// (scripts/dev.ts, the test harness). A deployed instance runs from its
-// own instance.jsonc (instance.example.jsonc, README.md).
+// For local development and the tests only, which put its apps in its
+// local database (scripts/dev.ts, the test harness). A deployed
+// instance runs from its own instance.jsonc (instance.example.jsonc,
+// README.md).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "colibrii",

@@ -1,5 +1,6 @@
-// The device registry in D1 (migrations/0001_init.sql). The Worker and
-// each account's Durable Object reach it, and every query lives here.
+// The device registry and the instance's apps in D1 (migrations/). The
+// Worker and each account's Durable Object reach it, and every query
+// lives here.
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,6 +11,7 @@ import {
   DeviceData,
   type Device,
 } from "@colibrii/sdk/wire/device";
+import { APP_COLUMNS, type App, decodeAppRow } from "./apps.ts";
 import { WorkerEnv } from "./env.ts";
 
 export class RegistryError extends Schema.TaggedError<RegistryError>()(
@@ -110,6 +112,7 @@ export class Registry extends Context.Service<
     readonly touchLastSeen: (
       deviceId: string,
     ) => Effect.Effect<void, RegistryError>;
+    readonly app: (appId: string) => Effect.Effect<App | null, RegistryError>;
   }
 >()("colibrii/service/Registry") {}
 
@@ -321,6 +324,20 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const app = Effect.fn("Registry.app")(function* (appId: string) {
+    const row = yield* query("read an app", () =>
+      db
+        .prepare(`SELECT ${APP_COLUMNS} FROM apps WHERE id = ?`)
+        .bind(appId)
+        .first(),
+    );
+    if (row === null) return null;
+    return yield* Effect.try({
+      try: () => decodeAppRow(row),
+      catch: (cause) => new RegistryError({ operation: "read an app", cause }),
+    });
+  });
+
   return Registry.of({
     byId,
     byCredentialHash,
@@ -331,6 +348,7 @@ const make = Effect.gen(function* () {
     isRevoked,
     update,
     touchLastSeen,
+    app,
   });
 });
 
