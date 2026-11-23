@@ -55,7 +55,7 @@ its runner provisions again.
 | State | Meaning |
 |---|---|
 | `off` | The device does not listen, so it has no tunnel. |
-| `no-binary` | No usable `cloudflared` was found. The device does not look again until it next starts. |
+| `no-binary` | No usable `cloudflared` was found. The device looks again when the machine wakes. |
 | `starting` | Finding `cloudflared`, provisioning, or waiting until the hostname routes. |
 | `up` | Routing. Only now does the device offer its `tunnel` candidate. |
 | `error` | It failed, and will be retried. |

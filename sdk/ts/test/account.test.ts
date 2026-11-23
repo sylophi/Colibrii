@@ -347,7 +347,10 @@ describe("the device list", () => {
         expect(
           yield* waitFor(phone.account, (state) => state._tag === "SignedOut"),
         ).toEqual({ _tag: "SignedOut", removed: true });
-        expect(Option.isNone(yield* store.read)).toBe(true);
+        expect(JSON.parse(Option.getOrThrow(yield* store.read))).toEqual({
+          deviceId: phoneId,
+          removed: true,
+        });
         expect((yield* Effect.flip(phone.devices.list))._tag).toBe(
           "NotEnrolled",
         );
@@ -356,6 +359,7 @@ describe("the device list", () => {
           _tag: "SignedOut",
           removed: false,
         });
+        expect(Option.isNone(yield* store.read)).toBe(true);
       }),
     ));
 
@@ -377,6 +381,123 @@ describe("the device list", () => {
           deviceId: deviceIdOf(enrolled),
           accountId: (enrolled as { accountId: string }).accountId,
           reason: "superseded",
+        });
+      }),
+    ));
+});
+
+describe("a removal", () => {
+  const REMOVED = { _tag: "SignedOut", removed: true };
+
+  // A device in `store` that another device of the account removed
+  // while it ran.
+  const removedIn = (store: Colibrii.CredentialStore["Service"]) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const account = newAccountId();
+        const desk = yield* device();
+        yield* enroll(desk, account);
+        const phone = yield* device({ store });
+        yield* desk.devices.remove(deviceIdOf(yield* enroll(phone, account)));
+        yield* waitFor(phone.account, (state) => state._tag === "SignedOut");
+        return account;
+      }),
+    );
+
+  it("lasts into the next run on the same store", () =>
+    run(
+      Effect.gen(function* () {
+        const store = memoryStore();
+        yield* removedIn(store);
+        const later = yield* device({ store });
+        expect(yield* waitFor(later.account, () => true)).toEqual(REMOVED);
+      }),
+    ));
+
+  it("is kept by a device that learns of it as it starts", () =>
+    run(
+      Effect.gen(function* () {
+        const store = memoryStore();
+        const account = newAccountId();
+        const desk = yield* device();
+        yield* enroll(desk, account);
+        const phoneId = yield* Effect.scoped(
+          Effect.gen(function* () {
+            return deviceIdOf(yield* enroll(yield* device({ store }), account));
+          }),
+        );
+        yield* desk.devices.remove(phoneId);
+        const phone = yield* device({ store });
+        yield* waitFor(phone.account, (state) => state._tag === "SignedOut");
+        const later = yield* device({ store });
+        expect(yield* waitFor(later.account, () => true)).toEqual(REMOVED);
+      }),
+    ));
+
+  it("is cleared by enrolling", () =>
+    run(
+      Effect.gen(function* () {
+        const store = memoryStore();
+        const account = yield* removedIn(store);
+        const phone = yield* device({ store });
+        const enrolled = yield* enroll(phone, account);
+        const later = yield* device({ store });
+        expect(
+          yield* waitFor(
+            later.account,
+            (state) => state._tag === "Enrolled" && state.connected,
+          ),
+        ).toMatchObject({ deviceId: deviceIdOf(enrolled) });
+      }),
+    ));
+
+  it("is cleared by signing out", () =>
+    run(
+      Effect.gen(function* () {
+        const store = memoryStore();
+        yield* removedIn(store);
+        const phone = yield* device({ store });
+        expect(yield* phone.signOut).toBe(true);
+        const later = yield* device({ store });
+        expect(yield* waitFor(later.account, () => true)).toEqual({
+          _tag: "SignedOut",
+          removed: false,
+        });
+      }),
+    ));
+
+  it("leaves alone a store that another run enrolled since", () =>
+    run(
+      Effect.gen(function* () {
+        // Two tabs of one browser profile, which never hear of each
+        // other's changes.
+        const lock = Semaphore.makeUnsafe(1);
+        const store = {
+          ...memoryStore(),
+          shared: { changes: Stream.never, exclusive: lock.withPermits(1) },
+        };
+        const account = newAccountId();
+        const desk = yield* device();
+        yield* enroll(desk, account);
+        const slow = yield* device({ store, connections: "multi" });
+        const phoneId = deviceIdOf(yield* enroll(slow, account));
+        const slowSocket = spy.opened.findLast((entry) =>
+          entry.url.includes("/connect?"),
+        );
+        if (slowSocket !== undefined) slowSocket.deaf = true;
+        const quick = yield* device({ store, connections: "multi" });
+        yield* waitFor(
+          quick.account,
+          (state) => state._tag === "Enrolled" && state.connected,
+        );
+        yield* desk.devices.remove(phoneId);
+        yield* waitFor(quick.account, (state) => state._tag === "SignedOut");
+        const enrolled = yield* enroll(quick, account);
+        // The old credential, which the service revoked.
+        yield* Effect.flip(slow.devices.list);
+        expect(yield* waitFor(slow.account, () => true)).toEqual(REMOVED);
+        expect(JSON.parse(Option.getOrThrow(yield* store.read))).toMatchObject({
+          deviceId: deviceIdOf(enrolled),
         });
       }),
     ));

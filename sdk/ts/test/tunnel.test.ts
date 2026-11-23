@@ -216,6 +216,31 @@ describe.skipIf(process.platform === "win32")("the tunnel runner", () => {
       }),
     ));
 
+  it("looks for cloudflared again on a check while it has none", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const path = join(root, "installed-later");
+        yield* Effect.promise(() => mkdir(path));
+        const { provision } = provisionFor(false);
+        const before = process.env.PATH;
+        process.env.PATH = "";
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => (process.env.PATH = before)),
+        );
+        const tunnel = yield* makeTunnel(
+          { directory: path },
+          FAST,
+          probeUrl,
+        ).run({ port: 4000, provision });
+        yield* status(tunnel, "no-binary");
+        yield* Effect.promise(() =>
+          writeFile(pinnedPath(path), FAKE, { mode: 0o755 }),
+        );
+        yield* tunnel.check;
+        yield* until(async () => (await runsIn(path)).length > 0);
+      }).pipe(Effect.scoped),
+    ));
+
   it("comes up once the hostname routes, its token in the environment alone and its log in a file", () =>
     Effect.runPromise(
       Effect.gen(function* () {

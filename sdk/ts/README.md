@@ -47,7 +47,7 @@ Effect's unstable HTTP modules, so it names the exact version it was
 built with.
 
 ```sh
-pnpm add https://github.com/sylophi/Colibrii/releases/download/v0.1.0/colibrii-sdk-0.1.0.tgz effect@4.1.4
+pnpm add https://github.com/sylophi/Colibrii/releases/download/v0.1.1/colibrii-sdk-0.1.1.tgz effect@4.1.4
 ```
 
 In a checkout of this repository, `pnpm pack:sdk` builds the same
@@ -118,8 +118,11 @@ back: its links stay up, and an app holds back saying it went offline.
 A device removed from the account, by another device or past the
 account's cap, reads as `SignedOut` with `removed: true` and forgets
 its credential, until it enrolls again or the app signs it out, which
-is how an app says it has acted on the removal. A device stops when another copy of a `single` device
-connects (`superseded`), when its credential was replaced
+is how an app says it has acted on the removal. The store keeps that
+it was removed, so a run made later on it reads the same, and an app
+that quit before it acted on a removal meets it again on its next
+start. A device stops when another copy of a `single` device connects
+(`superseded`), when its credential was replaced
 (`credential-rejected`) or when the service wants a newer SDK
 (`update-required`). It stays stopped until it enrolls again.
 
@@ -280,8 +283,9 @@ hostname routes, `up` once it does, and `error` until the next start.
 Only while it is `up` does the device offer the tunnel to a peer.
 The runner provisions the tunnel through the service, starts it again
 on a ladder after it fails, checks it again when the machine wakes or
-a peer never arrives through it, and ends its `cloudflared` when the
-device's scope closes. It keeps the process id, when that process
+a peer never arrives through it, looks for a `cloudflared` again when
+the machine wakes while it has none, and ends its `cloudflared` when
+the device's scope closes. It keeps the process id, when that process
 started, and `cloudflared`'s log (`cloudflared.log`) in the directory,
 and ends a `cloudflared` a crashed run left behind at its next start,
 only while that id still names the process it started. A
@@ -320,12 +324,12 @@ const program = Effect.gen(function* () {
 A tab follows the others through the `storage` event: one tab's
 enrollment connects every open tab, and a sign-out or a removal signs
 them all out. Each tab tries a removal still owed, one at a time, and
-the first the service answers clears it for all. Each tab reads `removed` as it learned of it: a tab that
-heard of another tab's sign-out before its own socket closed reads
-`removed: false`. Tabs enroll and sign out one at a time, under a lock
-named after the key (`navigator.locks`), and a tab that waited behind
-another's enrollment runs that one instead of enrolling again. Any
-script on the page's origin can read the entry.
+the first the service answers clears it for all. A removal reads as
+`removed: true` in every tab, one opened after it included, until one
+of them enrolls or signs out. Tabs enroll and sign out one at a time,
+under a lock named after the key (`navigator.locks`), and a tab that
+waited behind another's enrollment runs that one instead of enrolling
+again. Any script on the page's origin can read the entry.
 
 A page does not listen, so a peer dialing it fails with `no-listener`.
 It dials only a peer's tunnel (`wss://`), since a page served over

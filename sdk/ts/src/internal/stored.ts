@@ -27,13 +27,24 @@ export const Owed = Schema.Struct({
 });
 export type Owed = typeof Owed.Type;
 
-export const Stored = Schema.Union([Enrollment, Owed]);
+// Removed from the account, by another device or past its cap: the
+// device reads as removed until the app enrolls it or signs it out.
+export const Removed = Schema.Struct({
+  deviceId: DeviceId,
+  removed: Schema.Literal(true),
+});
+export type Removed = typeof Removed.Type;
+
+export const Stored = Schema.Union([Enrollment, Owed, Removed]);
 export type Stored = typeof Stored.Type;
 
 export const isOwed = (stored: Stored): stored is Owed => "signedOut" in stored;
 
+export const isRemoved = (stored: Stored | null): stored is Removed =>
+  stored !== null && "removed" in stored;
+
 export const enrollmentOf = (stored: Stored | null) =>
-  stored === null || isOwed(stored) ? null : stored;
+  stored === null || isOwed(stored) || isRemoved(stored) ? null : stored;
 
 const StoredJson = Schema.fromJsonString(Stored);
 

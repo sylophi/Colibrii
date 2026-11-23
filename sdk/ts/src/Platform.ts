@@ -115,7 +115,8 @@ export type TunnelProvision = typeof TunnelResponse.Type;
 export interface RunningTunnel {
   // The state now, then every change.
   readonly state: Stream.Stream<TunnelState>;
-  // Asks a tunnel that is up whether it still routes.
+  // Asks a tunnel that is up whether it still routes, and one that found
+  // no cloudflared to look again.
   readonly check: Effect.Effect<void>;
 }
 

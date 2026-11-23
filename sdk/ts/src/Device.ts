@@ -226,6 +226,7 @@ const isData = Schema.is(DeviceData);
 const decodeConnectInfo = Schema.decodeUnknownOption(ConnectInfoInput);
 
 const SIGNED_OUT: AccountState = { _tag: "SignedOut", removed: false };
+const REMOVED: AccountState = { _tag: "SignedOut", removed: true };
 
 const valid =
   <A>(is: (value: A) => boolean, field: InvalidInputError["field"]) =>
@@ -258,7 +259,10 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
     Stream.runForEach(() => PubSub.publish(wakes, undefined)),
     Effect.forkScoped,
   );
-  const account = yield* SubscriptionRef.make<AccountState>(SIGNED_OUT);
+  const first = yield* readStored;
+  const account = yield* SubscriptionRef.make<AccountState>(
+    Stored.isRemoved(first) ? REMOVED : SIGNED_OUT,
+  );
   const peers = yield* SubscriptionRef.make<ReadonlyArray<Peer>>([]);
   const tunnelState = yield* SubscriptionRef.make<TunnelState>({
     status: "off",
@@ -474,14 +478,13 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
           // Unless another run sharing the store enrolled since.
           yield* readStored.pipe(
             Effect.flatMap((stored) =>
-              stored?.credential === credential ? Stored.remove : Effect.void,
+              Stored.enrollmentOf(stored)?.credential === credential
+                ? Stored.write({ deviceId: current.deviceId, removed: true })
+                : Effect.void,
             ),
             Effect.ignore,
           );
-          yield* SubscriptionRef.set(account, {
-            _tag: "SignedOut",
-            removed: true,
-          });
+          yield* SubscriptionRef.set(account, REMOVED);
         } else {
           yield* SubscriptionRef.set(account, {
             _tag: "Stopped",
@@ -553,7 +556,7 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
     );
   }).pipe(Effect.ignore, Effect.provideContext(services));
 
-  const loaded = Stored.enrollmentOf(yield* readStored);
+  const loaded = Stored.enrollmentOf(first);
   if (loaded !== null) {
     enrollment = loaded;
     yield* start(loaded);
@@ -571,12 +574,19 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
       Stream.runForEach(() =>
         lifecycle.withPermits(1)(
           Effect.gen(function* () {
-            const now = Stored.enrollmentOf(yield* readStored);
-            if (now?.credential === enrollment?.credential) return;
-            enrollment = now;
-            if (now !== null) return yield* start(now);
+            const stored = yield* readStored;
+            const now = Stored.enrollmentOf(stored);
+            if (now !== null) {
+              if (now.credential === enrollment?.credential) return;
+              enrollment = now;
+              return yield* start(now);
+            }
+            const removed = Stored.isRemoved(stored);
+            const state = yield* SubscriptionRef.get(account);
+            if (state._tag === "SignedOut" && state.removed === removed) return;
+            enrollment = null;
             yield* end;
-            yield* SubscriptionRef.set(account, SIGNED_OUT);
+            yield* SubscriptionRef.set(account, removed ? REMOVED : SIGNED_OUT);
           }).pipe(Effect.ignore),
         ),
       ),
@@ -666,6 +676,14 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
           if (state._tag === "SignedOut" && state.removed) {
             yield* SubscriptionRef.set(account, SIGNED_OUT);
           }
+          return true;
+        }
+        // The service let the device go: nothing to revoke.
+        if (Stored.isRemoved(current)) {
+          yield* Stored.remove;
+          yield* end;
+          enrollment = null;
+          yield* SubscriptionRef.set(account, SIGNED_OUT);
           return true;
         }
         if (Stored.isOwed(current)) return yield* deliver(current);
