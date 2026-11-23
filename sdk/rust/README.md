@@ -35,7 +35,7 @@ git dependency, by the tag of a release:
 
 ```toml
 [dependencies]
-colibrii = { git = "https://github.com/sylophi/Colibrii", tag = "v0.1.2" }
+colibrii = { git = "https://github.com/sylophi/Colibrii", tag = "v0.1.1" }
 ```
 
 It speaks TLS through rustls, with the system's root certificates, and
