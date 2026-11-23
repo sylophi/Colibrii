@@ -416,7 +416,7 @@ const makeRun =
         }).pipe(Effect.scoped);
 
       yield* Effect.gen(function* () {
-        const [, binary] = yield* Effect.all(
+        let [, binary] = yield* Effect.all(
           [
             endLeftoverCloudflared(options.directory, timings.stopGrace),
             findBinary(options),
@@ -424,7 +424,11 @@ const makeRun =
           { concurrency: 2 },
         );
         if (Option.isNone(binary)) {
-          return yield* SubscriptionRef.set(state, { status: "no-binary" });
+          yield* SubscriptionRef.set(state, { status: "no-binary" });
+        }
+        while (Option.isNone(binary)) {
+          yield* Queue.take(checks);
+          binary = yield* findBinary(options);
         }
         yield* attempt(binary.value).pipe(
           Effect.repeat(
@@ -439,7 +443,8 @@ const makeRun =
       return {
         state: SubscriptionRef.changes(state),
         check: Effect.gen(function* () {
-          if ((yield* SubscriptionRef.get(state)).status === "up") {
+          const { status } = yield* SubscriptionRef.get(state);
+          if (status === "up" || status === "no-binary") {
             yield* Queue.offer(checks, undefined);
           }
         }),

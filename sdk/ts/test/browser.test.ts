@@ -278,21 +278,43 @@ describe.runIf(chrome !== undefined)("a page", () => {
     );
   });
 
-  it("reads as signed out and removed once a Node device removes it", async () => {
-    const tab = await openTab(await profile());
+  it("reads as removed in every tab once a Node device removes it, until one signs out", async () => {
+    const context = await profile();
+    const first = await openTab(context);
+    const second = await openTab(context);
     await run(
       Effect.gen(function* () {
         const account = newAccountId();
         const desk = yield* device();
         yield* enroll(desk, account, "Desk");
-        yield* Effect.promise(() => enrollIn(tab, account));
-        const tabId = yield* Effect.promise(() => connected(tab));
+        yield* Effect.promise(() => enrollIn(first, account));
+        const tabId = yield* Effect.promise(() => connected(first));
+        yield* Effect.promise(() => connected(second));
         yield* desk.devices.remove(tabId);
-        expect(yield* Effect.promise(() => signedOut(tab))).toEqual({
-          _tag: "SignedOut",
-          removed: true,
-        });
-        expect(yield* Effect.promise(() => stored(tab))).toBeNull();
+        const removed = { _tag: "SignedOut", removed: true };
+        for (const tab of [first, second]) {
+          expect(yield* Effect.promise(() => signedOut(tab))).toEqual(removed);
+        }
+        expect(
+          JSON.parse((yield* Effect.promise(() => stored(first))) ?? ""),
+        ).toEqual({ deviceId: tabId, removed: true });
+        const later = yield* Effect.promise(() => openTab(context));
+        expect(yield* Effect.promise(() => signedOut(later))).toEqual(removed);
+        expect(
+          yield* Effect.promise(() =>
+            later.evaluate(() => window.colibrii.signOut()),
+          ),
+        ).toEqual({ ok: true });
+        yield* Effect.promise(() =>
+          first.waitForFunction(
+            () =>
+              window.colibrii.state.account?._tag === "SignedOut" &&
+              !window.colibrii.state.account.removed,
+            undefined,
+            { timeout: WAIT_MS, polling: 50 },
+          ),
+        );
+        expect(yield* Effect.promise(() => stored(first))).toBeNull();
       }),
     );
   });
