@@ -1,13 +1,13 @@
 //! The listener (spec/link.md, "Admission"), and this device's answer to a
 //! connectInfo ask (spec/relay.md, "connectInfo").
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use tokio::time::{Instant, timeout};
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
@@ -98,6 +98,40 @@ impl std::fmt::Debug for IncomingHello {
             .field("connection_id", &self.connection_id)
             .field("arrival", &self.arrival)
             .finish()
+    }
+}
+
+/// The hellos waiting for the app, each only while its dialer still waits
+/// for the answer, so at most one per socket not yet welcomed.
+#[derive(Default)]
+pub(crate) struct Hellos {
+    waiting: Mutex<VecDeque<IncomingHello>>,
+    added: Notify,
+}
+
+impl Hellos {
+    fn add(&self, hello: IncomingHello) {
+        let mut waiting = self.waiting.lock().unwrap();
+        waiting.retain(|waiting| !waiting.decide.is_closed());
+        waiting.push_back(hello);
+        drop(waiting);
+        self.added.notify_waiters();
+    }
+
+    /// The oldest hello whose dialer still waits.
+    pub async fn next(&self) -> IncomingHello {
+        loop {
+            let added = self.added.notified();
+            {
+                let mut waiting = self.waiting.lock().unwrap();
+                while let Some(hello) = waiting.pop_front() {
+                    if !hello.decide.is_closed() {
+                        return hello;
+                    }
+                }
+            }
+            added.await;
+        }
     }
 }
 
@@ -395,7 +429,7 @@ impl Listener {
             return None;
         }
         let (decide, decided) = oneshot::channel();
-        let _ = self.inner.incoming.0.send(IncomingHello {
+        self.inner.incoming.add(IncomingHello {
             device_id: hello.device_id.clone(),
             connection_id: hello.connection_id.clone(),
             arrival: arrival.kind,
@@ -518,13 +552,36 @@ impl Listener {
 
 #[cfg(test)]
 mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::io::DuplexStream;
+    use tokio::task::JoinHandle;
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::tungstenite::Message;
+
     use super::*;
+    use crate::Device;
     use crate::fakes;
     use crate::hub_socket::FakeAttempt;
+    use crate::wire::link::{Hello, finish_handshake, seal_transport_message, start_handshake};
     use crate::wire::noise::KeyPair;
 
-    #[tokio::test]
-    async fn a_peer_that_leaves_a_settled_roster_and_comes_back_at_once_loses_its_tickets() {
+    /// A listener whose settled roster names one peer.
+    struct Listening {
+        _device: Device,
+        listener: Arc<Listener>,
+        shared: Arc<Shared>,
+        attempt: FakeAttempt,
+        peer: String,
+        peer_key: KeyPair,
+    }
+
+    impl Drop for Listening {
+        fn drop(&mut self) {
+            self.shared.ended.cancel();
+        }
+    }
+
+    async fn listening() -> Listening {
         let device = fakes::device().await;
         let inner = device.inner().clone();
         let identity =
@@ -532,18 +589,74 @@ mod tests {
         let shared = Shared::new();
         let listener = Listener::start(inner.clone(), identity, shared.clone(), &Listen::new(), 0).await.unwrap();
         let attempt = FakeAttempt::new(&inner, shared.clone()).await;
-        let (peer, connection_id) = fakes::ids();
-        let (with, without) = (fakes::presence(&[(&peer, KeyPair::generate().public_key)]), fakes::presence(&[]));
-        attempt.hear(&with);
+        let (peer, peer_key) = (fakes::ids().0, KeyPair::generate());
+        attempt.hear(&fakes::presence(&[(&peer, peer_key.public_key)]));
         attempt.settle();
-        let ticket =
-            listener.state.lock().unwrap().tickets.mint(&peer, &connection_id, &[CandidateKind::Lan], wall_ms());
-        let ticket = ticket.unwrap().remove(0);
-        attempt.hear(&without);
-        attempt.hear(&with);
+        Listening { _device: device, listener, shared, attempt, peer, peer_key }
+    }
+
+    impl Listening {
+        fn ticket(&self, connection_id: &str) -> String {
+            let mut state = self.listener.state.lock().unwrap();
+            state.tickets.mint(&self.peer, connection_id, &[CandidateKind::Lan], wall_ms()).unwrap().remove(0)
+        }
+
+        /// Dials as the peer over a socket of its own, up to its hello: the
+        /// socket's far end, the dialer's transport, and the admission.
+        async fn hello(
+            &self,
+            connection_id: &str,
+        ) -> (WebSocketStream<DuplexStream>, Transport, JoinHandle<Option<Arc<LiveLink>>>) {
+            let (conn, mut far) = fakes::conn(&self.listener.inner.tasks).await;
+            let (listener, arrival) =
+                (self.listener.clone(), Arrival { address: "192.0.2.1".into(), kind: CandidateKind::Lan });
+            let admitting = tokio::spawn(async move { listener.admit(&Arc::new(conn), 0, &arrival).await });
+            let ticket = self.ticket(connection_id);
+            let listener_key = self.listener.identity.key.public_key;
+            let (first, mut handshake) = start_handshake(&ticket, &self.peer_key, listener_key, None).unwrap();
+            far.send(Message::binary(first)).await.unwrap();
+            let second = far.next().await.unwrap().unwrap().into_data();
+            let mut transport = finish_handshake(&mut handshake, &second).unwrap();
+            let hello = TransportMessage::Hello(Hello {
+                device_id: self.peer.clone(),
+                connection_id: connection_id.to_owned(),
+                app_hello: Vec::new(),
+            });
+            far.send(Message::binary(seal_transport_message(&mut transport, &hello).unwrap())).await.unwrap();
+            (far, transport, admitting)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_leaves_a_settled_roster_and_comes_back_at_once_loses_its_tickets() {
+        let listening = listening().await;
+        let ticket = listening.ticket(&fakes::ids().1);
+        let (with, without) =
+            (fakes::presence(&[(&listening.peer, listening.peer_key.public_key)]), fakes::presence(&[]));
+        listening.attempt.hear(&without);
+        listening.attempt.hear(&with);
         tokio::task::yield_now().await;
-        let check = listener.state.lock().unwrap().tickets.check(&ticket, CandidateKind::Lan, wall_ms());
+        let check = listening.listener.state.lock().unwrap().tickets.check(&ticket, CandidateKind::Lan, wall_ms());
         assert!(!matches!(check, Check::Pending { .. }));
-        shared.ended.cancel();
+    }
+
+    #[tokio::test]
+    async fn a_hello_whose_dialer_gave_up_never_reaches_the_app() {
+        let listening = listening().await;
+        let incoming = &listening.listener.inner.incoming;
+        for _ in 0..20 {
+            let (_far, _, admitting) = listening.hello(&fakes::ids().1).await;
+            while incoming.waiting.lock().unwrap().iter().all(|hello| hello.decide.is_closed()) {
+                tokio::task::yield_now().await;
+            }
+            // As the welcome's deadline does.
+            admitting.abort();
+            let _ = admitting.await;
+        }
+        let current = fakes::ids().1;
+        let (_far, _, _admitting) = listening.hello(&current).await;
+        let hello = incoming.next().await;
+        assert_eq!(hello.connection_id, current);
+        assert!(incoming.waiting.lock().unwrap().is_empty());
     }
 }

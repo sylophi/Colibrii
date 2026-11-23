@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use reqwest::Method;
 use serde_json::{Map, Value};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -16,7 +16,7 @@ use tokio_util::task::TaskTracker;
 use crate::Link;
 use crate::errors::{DialError, Error, InvalidInput, StoreOperation};
 use crate::hub_api::{self, HubApi};
-use crate::listener::{IncomingHello, Listen};
+use crate::listener::{Hellos, IncomingHello, Listen};
 use crate::runtime::{Runtime, Task, spawn_until};
 use crate::session::Session;
 use crate::store::{CredentialStore, Enrollment, Owed, Stored};
@@ -199,7 +199,7 @@ pub(crate) struct Inner {
     /// Every task of the device's, which closing waits for.
     pub tasks: TaskTracker,
     /// The hellos for the app to decide on.
-    pub incoming: (mpsc::UnboundedSender<IncomingHello>, tokio::sync::Mutex<mpsc::UnboundedReceiver<IncomingHello>>),
+    pub incoming: Hellos,
 }
 
 /// One install of one app: enrolled under the person's account, it keeps
@@ -241,10 +241,7 @@ impl Device {
             connection_id: new_connection_id(),
             closing: CancellationToken::new(),
             tasks: TaskTracker::new(),
-            incoming: {
-                let (sender, receiver) = mpsc::unbounded_channel();
-                (sender, tokio::sync::Mutex::new(receiver))
-            },
+            incoming: Hellos::default(),
         });
         let started = runtime.run(inner.clone().start_up()).await;
         let device = Device { inner, runtime, closed: false };
@@ -373,9 +370,8 @@ pub struct Incoming {
 
 impl Incoming {
     pub async fn next(&self) -> Option<IncomingHello> {
-        let mut receiver = self.inner.incoming.1.lock().await;
         tokio::select! {
-            hello = receiver.recv() => hello,
+            hello = self.inner.incoming.next() => Some(hello),
             _ = self.inner.closing.cancelled() => None,
         }
     }
