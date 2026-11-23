@@ -9,11 +9,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, oneshot};
 use tokio::time::{Instant, timeout};
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 
-use crate::conn::{Conn, Msg};
+use crate::conn::{CLOSE_GRACE, Conn, Msg};
 use crate::device::{Inner, TunnelState};
 use crate::hub_socket::{Identity, Join, Shared};
 use crate::link::{LiveLink, NewLink, Role, send_sealed};
@@ -170,6 +172,8 @@ struct State {
     /// By device, the asks in a row offered the tunnel since a ticket of its
     /// last reached the listener.
     unreached: HashMap<String, u32>,
+    /// Connections not yet past their upgrade, which hold no slot yet.
+    upgrading: usize,
     open: usize,
     next_socket: u64,
 }
@@ -265,6 +269,14 @@ impl Listener {
             let serving = listener.clone();
             shared.spawn(async move {
                 while let Ok((stream, remote)) = socket.accept().await {
+                    // As many upgrade at once as may wait for a welcome.
+                    {
+                        let mut state = serving.state.lock().unwrap();
+                        if state.upgrading >= MAX_UNWELCOMED_SOCKETS {
+                            continue;
+                        }
+                        state.upgrading += 1;
+                    }
                     let serving_one = serving.clone();
                     serving.shared.spawn(async move { serving_one.serve(stream, remote.ip()).await });
                 }
@@ -289,14 +301,14 @@ impl Listener {
 
     // The refusal's type is tungstenite's.
     #[allow(clippy::result_large_err)]
-    async fn upgrade(&self, stream: TcpStream) -> Option<(Conn, Option<String>)> {
+    async fn upgrade(&self, stream: TcpStream) -> Option<(WebSocketStream<TcpStream>, Option<String>)> {
         let mut connecting_ip = None;
         let origins = &self.origins;
         let check = |request: &Request, response: Response| {
-            let header = |name: &str| request.headers().get(name).and_then(|value| value.to_str().ok());
-            connecting_ip = header("cf-connecting-ip").map(str::to_owned);
+            let header = |name: &str| request.headers().get(name).map(|value| value.to_str().ok());
+            connecting_ip = header("cf-connecting-ip").flatten().map(str::to_owned);
             match header("origin") {
-                Some(origin) if !origins.iter().any(|allowed| allowed == origin) => {
+                Some(origin) if !origin.is_some_and(|origin| origins.iter().any(|allowed| allowed == origin)) => {
                     let mut refused = ErrorResponse::new(None);
                     *refused.status_mut() = StatusCode::UNAUTHORIZED;
                     Err(refused)
@@ -309,31 +321,42 @@ impl Listener {
             .max_message_size(Some(MAX_MESSAGE_BYTES + 1))
             .max_frame_size(Some(MAX_MESSAGE_BYTES + 1));
         let ws = tokio_tungstenite::accept_hdr_async_with_config(stream, check, Some(config)).await.ok()?;
-        Some((Conn::accepted(ws, &self.inner.tasks), connecting_ip))
+        Some((ws, connecting_ip))
     }
 
     async fn serve(self: Arc<Self>, stream: TcpStream, remote: IpAddr) {
         let welcome_within = Duration::from_millis(WELCOME_WITHIN_MS);
-        let Ok(Some((conn, connecting_ip))) = timeout(welcome_within, self.upgrade(stream)).await else { return };
-        let conn = Arc::new(conn);
+        let upgraded = timeout(welcome_within, self.upgrade(stream)).await;
+        self.state.lock().unwrap().upgrading -= 1;
+        let Ok(Some((ws, connecting_ip))) = upgraded else { return };
         let remote = remote.to_canonical();
         let arrival = match connecting_ip {
             Some(address) if remote.is_loopback() => Arrival { address, kind: CandidateKind::Tunnel },
             _ => Arrival { address: remote.to_string(), kind: CandidateKind::Lan },
         };
-        let id = {
+        // The slot comes before the socket's driver, which a refused one
+        // never gets.
+        let slot = {
             let mut state = self.state.lock().unwrap();
             if state.open >= MAX_SOCKETS || state.unwelcomed.len() >= MAX_UNWELCOMED_SOCKETS {
-                return conn.close(CLOSE_TRY_AGAIN, "over capacity");
+                Err((ws, CLOSE_TRY_AGAIN, "over capacity"))
+            } else if state.locked_out(&arrival.address, Instant::now()) {
+                Err((ws, CLOSE_LOCKED_OUT, "locked out"))
+            } else {
+                state.open += 1;
+                state.next_socket += 1;
+                let (id, conn) = (state.next_socket, Arc::new(Conn::accepted(ws, &self.inner.tasks)));
+                state.unwelcomed.insert(id, (conn.clone(), None));
+                Ok((id, conn))
             }
-            if state.locked_out(&arrival.address, Instant::now()) {
-                return conn.close(CLOSE_LOCKED_OUT, "locked out");
+        };
+        let (id, conn) = match slot {
+            Ok(slot) => slot,
+            Err((mut ws, code, reason)) => {
+                let frame = CloseFrame { code: CloseCode::from(code), reason: reason.into() };
+                let _ = timeout(CLOSE_GRACE, ws.close(Some(frame))).await;
+                return;
             }
-            state.open += 1;
-            state.next_socket += 1;
-            let id = state.next_socket;
-            state.unwelcomed.insert(id, (conn.clone(), None));
-            id
         };
         struct Counted<'a>(&'a Listener, u64);
         impl Drop for Counted<'_> {
@@ -657,5 +680,36 @@ mod tests {
         let hello = incoming.next().await;
         assert_eq!(hello.connection_id, current);
         assert!(incoming.waiting.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn connections_past_those_that_may_upgrade_at_once_are_let_go_at_once() {
+        use tokio::io::AsyncReadExt;
+        let listening = listening().await;
+        let port = listening.listener.port;
+        let mut idle = Vec::new();
+        for _ in 0..MAX_UNWELCOMED_SOCKETS {
+            idle.push(TcpStream::connect(("127.0.0.1", port)).await.unwrap());
+        }
+        let mut past = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let read = timeout(Duration::from_secs(2), past.read(&mut [0; 1])).await;
+        assert!(matches!(read, Ok(Ok(0) | Err(_))), "{read:?}");
+    }
+
+    #[tokio::test]
+    async fn an_origin_that_does_not_decode_is_refused() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::tungstenite::http::HeaderValue;
+        let listening = listening().await;
+        let url = format!("ws://127.0.0.1:{}", listening.listener.port);
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert("origin", HeaderValue::from_bytes(b"https://\xffapp.example").unwrap());
+        let stream = TcpStream::connect(("127.0.0.1", listening.listener.port)).await.unwrap();
+        let upgraded = tokio_tungstenite::client_async(request, stream).await;
+        let status = match upgraded {
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => Some(response.status()),
+            _ => None,
+        };
+        assert_eq!(status, Some(StatusCode::UNAUTHORIZED));
     }
 }

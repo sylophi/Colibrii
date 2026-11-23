@@ -25,7 +25,7 @@ use crate::wire::hub::MAX_SERVICE_MESSAGE_BYTES;
 /// How long a closing socket waits for the other end's close before it
 /// drops the connection. A hub in workerd keeps the connection past its
 /// close frame.
-const CLOSE_GRACE: Duration = Duration::from_secs(1);
+pub(crate) const CLOSE_GRACE: Duration = Duration::from_secs(1);
 
 /// The code a connection that ended without a close frame reads as.
 pub(crate) const CLOSE_ABNORMAL: u16 = 1006;
