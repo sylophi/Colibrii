@@ -207,9 +207,9 @@ pub(crate) struct Inner {
 /// online, and opens end-to-end encrypted links to them. Dropping it closes
 /// it, as [`Device::close`] does without waiting.
 ///
-/// A call, once made, runs to its end even if what it returned is dropped,
-/// so the device and its store never part ways halfway. A dial is the one
-/// that stops.
+/// Enrolling, signing out and closing, once begun, run to their end even if
+/// what they returned is dropped, so the device and its store never part
+/// ways halfway. Every other call stops when what it returned is dropped.
 pub struct Device {
     inner: Arc<Inner>,
     runtime: Arc<Runtime>,
@@ -274,7 +274,7 @@ impl Device {
             valid(is_device_data(data), InvalidInput::Data)?;
         }
         let (login_token, name) = (login_token.to_owned(), name.to_owned());
-        self.run(|inner| async move { inner.enroll(login_token, name, data).await }).await
+        self.run_through(|inner| async move { inner.enroll(login_token, name, data).await }).await
     }
 
     /// Forgets the credential and reads as signed out at once, then removes
@@ -283,7 +283,7 @@ impl Device {
     /// made, on a wake, before an enrollment, and on the next sign-out.
     /// True once the service let the device go and nothing is owed.
     pub async fn sign_out(&self) -> Result<bool, Error> {
-        self.run(|inner| async move { inner.sign_out().await }).await
+        self.run_through(|inner| async move { inner.sign_out().await }).await
     }
 
     /// Dials a peer: the link, once its app welcomed the app hello, of at
@@ -324,12 +324,22 @@ impl Device {
     }
 
     /// Runs `work` on the device's runtime, to its end.
-    fn run<F>(&self, work: impl FnOnce(Arc<Inner>) -> F) -> Task<F::Output>
+    fn run_through<F>(&self, work: impl FnOnce(Arc<Inner>) -> F) -> Task<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
         self.runtime.run_through(&self.inner.tasks, work(self.inner.clone()))
+    }
+
+    /// Runs `work` on the device's runtime, until what this returns is
+    /// dropped.
+    fn run<F>(&self, work: impl FnOnce(Arc<Inner>) -> F) -> Task<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.runtime.run(work(self.inner.clone()))
     }
 
     #[cfg(test)]
@@ -426,7 +436,7 @@ impl Devices<'_> {
                 inner.with_credential(Method::DELETE, path, None::<&()>, hub_api::DEVICE_BY_ID).await?;
                 // Without its hub socket to say so, as while stopped.
                 if let Some(this) = this.filter(|this| this.device_id == device_id) {
-                    inner.settle(&this.credential, Stop::Removed).await;
+                    let _ = inner.settle_apart(this.credential, Stop::Removed).await;
                 }
                 Ok(())
             })
@@ -540,7 +550,7 @@ impl Inner {
     }
 
     /// The device stops, if `credential` is still the one it holds.
-    pub async fn settle(self: &Arc<Self>, credential: &str, stop: Stop) {
+    async fn settle(self: &Arc<Self>, credential: &str, stop: Stop) {
         let _held = self.lifecycle.lock().await;
         if self.closing.is_cancelled() {
             return;
@@ -578,16 +588,17 @@ impl Inner {
         });
     }
 
-    /// Settles apart from the caller, such as a session that settling ends.
-    pub fn settle_apart(self: &Arc<Self>, credential: String, stop: Stop) {
+    /// Settles apart from the caller, to its end whether or not anything
+    /// waits, such as a session that settling ends or a call dropped.
+    pub fn settle_apart(self: &Arc<Self>, credential: String, stop: Stop) -> JoinHandle<()> {
         let inner = self.clone();
-        self.tasks.spawn(async move { inner.settle(&credential, stop).await });
+        self.tasks.spawn(async move { inner.settle(&credential, stop).await })
     }
 
     /// Settles a call's error that stops the device, apart from the call.
     pub fn settle_on(self: &Arc<Self>, credential: &str, error: &Error) {
         if let Some(stop) = hub_api::stop_of_error(error) {
-            self.settle_apart(credential.to_owned(), stop);
+            drop(self.settle_apart(credential.to_owned(), stop));
         }
     }
 
@@ -606,7 +617,7 @@ impl Inner {
         if let Err(error) = &answer
             && let Some(stop) = hub_api::stop_of_error(error)
         {
-            self.settle(&current.credential, stop).await;
+            let _ = self.settle_apart(current.credential, stop).await;
         }
         answer
     }
@@ -917,6 +928,56 @@ mod tests {
         drop(held);
         closing.await.unwrap();
         assert!(!running(&device));
+    }
+
+    #[tokio::test]
+    async fn a_list_dropped_while_it_waits_lets_its_request_go() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let hub = format!("http://{}", listener.local_addr().unwrap());
+        let (heard, mut listing) = tokio::sync::mpsc::unbounded_channel();
+        let (let_go, mut gone) = tokio::sync::mpsc::unbounded_channel();
+        // Takes every request, answers none, and says when the list's was
+        // let go.
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let (heard, let_go) = (heard.clone(), let_go.clone());
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut buffer = [0; 1024];
+                    while !request.windows(4).any(|end| end == b"\r\n\r\n") {
+                        match stream.read(&mut buffer).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(read) => request.extend_from_slice(&buffer[..read]),
+                        }
+                    }
+                    if !request.starts_with(b"GET /devices ") {
+                        return std::future::pending().await;
+                    }
+                    let _ = heard.send(());
+                    while let Ok(1..) = stream.read(&mut buffer).await {}
+                    let _ = let_go.send(());
+                });
+            }
+        });
+        let store = Arc::new(MemoryStore::new());
+        let enrollment = Enrollment {
+            device_id: new_device_id(),
+            account_id: "account".into(),
+            credential: "credential".into(),
+            private_key: KeyPair::generate().private_key,
+            port: None,
+        };
+        store.write(&Stored::Enrollment(enrollment).encode()).unwrap();
+        let options =
+            Options::new(hub, "inkwell", Connections::Single, store).runtime(tokio::runtime::Handle::current());
+        let device = Device::new(options).await.unwrap();
+        let devices = device.devices();
+        tokio::select! {
+            _ = devices.list() => panic!("the hub answers nothing"),
+            _ = listing.recv() => {}
+        }
+        assert!(timeout(Duration::from_secs(5), gone.recv()).await.is_ok());
     }
 
     #[tokio::test]

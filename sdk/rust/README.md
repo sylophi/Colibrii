@@ -303,6 +303,10 @@ smol::spawn(async move {
 .detach();
 ```
 
+Enrolling, signing out and closing run to their end once begun, even if
+the app drops the future, so the device and its store never part ways
+halfway. Any other call stops when its future is dropped.
+
 On a plain thread, `colibrii::block_on` runs one to its end:
 
 ```rust

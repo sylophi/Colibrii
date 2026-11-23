@@ -143,7 +143,7 @@ impl Session {
         });
 
         let (credential, settling) = (stored.credential, inner.clone());
-        shared.spawn(async move { settling.settle_apart(credential, hub.run().await) });
+        shared.spawn(async move { drop(settling.settle_apart(credential, hub.run().await)) });
         starting.0 = None;
         Ok(session)
     }
