@@ -7,7 +7,8 @@
 // Clerk instance could be checked with a key cached for this one.
 import { createClerkClient } from "@clerk/backend";
 import { decodeJwt, verifyJwt } from "@clerk/backend/jwt";
-import { originAllowed, type App } from "./config.ts";
+import { originAllowed } from "./apps.ts";
+import type { App } from "./config.ts";
 
 const SESSION_TYPE = "JWT";
 const OAUTH_TYPES = ["at+jwt", "application/at+jwt"];
