@@ -1,10 +1,18 @@
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vitest";
 import {
   AppMessageJoiner,
+  answerHandshake,
+  decodeFirstMessage,
+  finishHandshake,
+  linkPrologue,
+  makeLinkTicket,
   MAX_APP_MESSAGE_BYTES,
   MAX_PIECE_BYTES,
   splitAppMessage,
+  startHandshake,
 } from "../src/wire/link.ts";
+import { generateKeyPair, HandshakeState } from "../src/wire/noise.ts";
 
 const pieceSizes = (length: number) =>
   splitAppMessage(new Uint8Array(length)).map((piece) => [
@@ -42,5 +50,41 @@ describe("app messages", () => {
     expect(joined._tag === "Message" && joined.message).toEqual(
       new Uint8Array(250_000).fill(7),
     );
+  });
+});
+
+describe("the link handshake", () => {
+  const ticket = makeLinkTicket();
+  const dialer = generateKeyPair();
+  const listener = generateKeyPair();
+  const prologue = linkPrologue(ticket);
+
+  it("refuses a first message that carries a payload", () => {
+    const handshake = new HandshakeState({
+      initiator: true,
+      prologue,
+      s: dialer,
+      rs: listener.publicKey,
+    });
+    const { message } = handshake.writeMessage(Uint8Array.of(1));
+    expect(answerHandshake({ ticket, message, key: listener })).toEqual(
+      Option.none(),
+    );
+  });
+
+  it("refuses a second message that carries a payload", () => {
+    const { first, handshake } = startHandshake({
+      ticket,
+      key: dialer,
+      listenerKey: listener.publicKey,
+    });
+    const answering = new HandshakeState({
+      initiator: false,
+      prologue,
+      s: listener,
+    });
+    answering.readMessage(Option.getOrThrow(decodeFirstMessage(first)).message);
+    const { message } = answering.writeMessage(Uint8Array.of(1));
+    expect(finishHandshake(handshake, message)).toEqual(Option.none());
   });
 });

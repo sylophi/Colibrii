@@ -5,7 +5,7 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { signJwt } from "@clerk/backend/jwt";
-import { afterAll } from "vitest";
+import { afterAll, expect } from "vitest";
 import { createTestHarness } from "wrangler";
 
 const serviceDir = join(import.meta.dirname, "../../service");
@@ -43,9 +43,50 @@ const apps = [
   },
 ];
 
+// ---- What leaves the machine ----
+
+// wrangler's test harness sends the Worker's outbound requests through
+// this process's fetch. In a test the Worker's only ones are Cloudflare's
+// API, which removing a device asks for the device's tunnel and DNS
+// record: here there are none, so the removal deletes nothing. Any other
+// request leaving the machine is a mistake, kept here and failing the
+// run, and answered as one that could not be made.
+export interface Outbound {
+  readonly method: string;
+  readonly url: string;
+}
+
+export const cloudflareRequests: Array<Outbound> = [];
+export const unexpectedRequests: Array<Outbound> = [];
+const unexpectedListeners: Array<(request: Outbound) => void> = [];
+
+export const onUnexpectedRequest = (listener: (request: Outbound) => void) => {
+  unexpectedListeners.push(listener);
+};
+
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : input);
+  if (LOOPBACK.has(url.hostname)) return realFetch(input, init);
+  const request = {
+    method: init?.method ?? (input instanceof Request ? input.method : "GET"),
+    url: `${url.origin}${url.pathname}`,
+  };
+  if (url.origin === "https://api.cloudflare.com" && request.method === "GET") {
+    cloudflareRequests.push(request);
+    return Response.json({ success: true, result: [] });
+  }
+  unexpectedRequests.push(request);
+  for (const listener of unexpectedListeners) listener(request);
+  throw new TypeError(
+    `a request leaving the machine: ${request.method} ${request.url}`,
+  );
+};
+
 // It serves `served` in place of the two apps, to test the instance's
-// own checks.
-export const startService = async (served: ReadonlyArray<object> = apps) => {
+// own checks. `close` stops it.
+export const serve = async (served: ReadonlyArray<object> = apps) => {
   const server = createTestHarness({
     root: serviceDir,
     workers: [
@@ -63,8 +104,18 @@ export const startService = async (served: ReadonlyArray<object> = apps) => {
   const { url } = await server.listen();
   const worker = server.getWorker();
   await worker.applyD1Migrations("DB");
-  afterAll(() => server.close());
-  return { url: url.href, worker };
+  return { url: url.href, worker, close: () => server.close() };
+};
+
+// The service for a vitest file, stopped once its tests are done, which
+// then fail if any request left the machine.
+export const startService = async (served: ReadonlyArray<object> = apps) => {
+  const service = await serve(served);
+  afterAll(async () => {
+    await service.close();
+    expect(unexpectedRequests).toEqual([]);
+  });
+  return service;
 };
 
 // ---- Login tokens ----

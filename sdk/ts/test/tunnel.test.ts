@@ -264,11 +264,13 @@ describe.skipIf(process.platform === "win32")("the tunnel runner", () => {
         ]);
         expect(first?.token).toBe(TOKEN);
         expect(first?.logsToFile).toBe(true);
-        expect(
-          yield* Effect.promise(() =>
-            readFile(join(path, "cloudflared.pid"), "utf8"),
-          ),
-        ).toBe(yield* pidRecord(first?.pid ?? 0));
+        const record = yield* pidRecord(first?.pid ?? 0);
+        yield* until(
+          async () =>
+            (await readFile(join(path, "cloudflared.pid"), "utf8").catch(
+              () => "",
+            )) === record,
+        );
         stub.routing.status = 426;
         expect(yield* status(tunnel, "up")).toEqual({
           status: "up",

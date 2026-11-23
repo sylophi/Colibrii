@@ -13,12 +13,18 @@
   nothing else in `src/` imports `node:*` or `ws`. `src/browser/`
   binds them in a web page, and the browser tests check that the core
   and it bundle without either.
+- `sdk/rust` is the `colibrii` crate, the same device in Rust. Its
+  tests start the service through `harness/src/serve.ts`, and its
+  checks run in `sdk/rust`: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo test`.
 - `service/` is the Worker. Its README says how an instance is set up.
 - `harness/` runs the service in workerd for the service's tests and
   the SDK's.
-- A release is a GitHub release tagged `v` plus the SDK's version.
-  Publishing one attaches the SDK's tarball to it
-  (`.github/workflows/release.yml`), which is what an app installs.
+- A release is a GitHub release tagged `v` plus the version both SDKs
+  carry (`sdk/ts/package.json`, `sdk/rust/Cargo.toml`). Publishing one
+  attaches the TypeScript SDK's tarball to it
+  (`.github/workflows/release.yml`), which is what an app installs. A
+  Rust app takes the crate by the tag.
 - Install with pnpm. Install scripts are off, and new releases wait 7
   days: keep both settings.
 - Checks, from the root: `pnpm typecheck`, `pnpm lint`,

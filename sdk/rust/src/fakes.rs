@@ -1,0 +1,100 @@
+//! Stand-ins for the unit tests: a websocket with no network under it, a
+//! link over one, and a device whose hub never answers.
+
+use std::sync::Arc;
+
+use tokio::io::DuplexStream;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::Role as WsRole;
+use tokio_util::task::TaskTracker;
+
+use crate::conn::Conn;
+use crate::device::{Device, Inner, Options};
+use crate::link::{LiveLink, NewLink, Role};
+use crate::store::MemoryStore;
+use crate::wire::base64url;
+use crate::wire::hub::Connections;
+use crate::wire::ids::{new_connection_id, new_device_id};
+use crate::wire::noise::{CipherState, Transport};
+use crate::wire::relay::CandidateKind;
+
+/// A socket as the device holds it, and its far end.
+pub async fn conn(tasks: &TaskTracker) -> (Conn, WebSocketStream<DuplexStream>) {
+    let (near, far) = tokio::io::duplex(1 << 16);
+    let (near, far) = tokio::join!(
+        WebSocketStream::from_raw_socket(near, WsRole::Server, None),
+        WebSocketStream::from_raw_socket(far, WsRole::Client, None),
+    );
+    (Conn::accepted(near, tasks), far)
+}
+
+/// A device of the app, with a hub that never answers.
+pub async fn device() -> Device {
+    let options = Options::new("http://127.0.0.1:1", "inkwell", Connections::Single, Arc::new(MemoryStore::new()))
+        .runtime(tokio::runtime::Handle::current());
+    Device::new(options).await.unwrap()
+}
+
+/// A link this device listened for, from `device_id` under `peer_key`, over
+/// a socket whose far end it also gives.
+pub async fn listened(
+    inner: &Inner,
+    device_id: &str,
+    connection_id: &str,
+    peer_key: [u8; 32],
+) -> (Arc<LiveLink>, WebSocketStream<DuplexStream>) {
+    let (conn, far) = conn(&inner.tasks).await;
+    let link = LiveLink::new(NewLink {
+        conn: Arc::new(conn),
+        // Never used: the tests read and write no messages on it.
+        transport: Transport { send: CipherState::default(), receive: CipherState::default() },
+        role: Role::Listener,
+        device_id: device_id.to_owned(),
+        peer_key,
+        connection_id: connection_id.to_owned(),
+        arrival: CandidateKind::Lan,
+        greeting: Vec::new(),
+    });
+    (link, far)
+}
+
+/// A hub at the address this gives that answers every request with
+/// `status`, such as "202 Accepted", and any header lines after it, and no
+/// body.
+pub async fn hub_answering(status: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|end| end == b"\r\n\r\n") {
+                    match stream.read(&mut buffer).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => request.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let answer = format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                let _ = stream.write_all(answer.as_bytes()).await;
+            });
+        }
+    });
+    url
+}
+
+/// A presence naming each device with its key.
+pub fn presence(online: &[(&str, [u8; 32])]) -> String {
+    let online: Vec<_> = online
+        .iter()
+        .map(|(device_id, key)| {
+            serde_json::json!({ "deviceId": device_id, "publicKey": base64url::encode(key), "connections": "single" })
+        })
+        .collect();
+    serde_json::json!({ "t": "presence", "online": online }).to_string()
+}
+
+pub fn ids() -> (String, String) {
+    (new_device_id(), new_connection_id())
+}
