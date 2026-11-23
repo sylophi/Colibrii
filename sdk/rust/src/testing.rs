@@ -23,7 +23,13 @@ pub trait Hooks: Send + Sync + 'static {
         true
     }
 
-    /// Each socket this device opened.
+    /// True to keep what this device's sockets send, and to hand each one
+    /// it opens to `opened`.
+    fn spies(&self) -> bool {
+        false
+    }
+
+    /// Each socket this device opened, when it `spies`.
     fn opened(&self, _socket: Opened) {}
 
     fn dialable_kinds(&self) -> Vec<CandidateKind> {

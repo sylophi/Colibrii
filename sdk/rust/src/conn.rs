@@ -336,8 +336,10 @@ pub(crate) async fn open(
         .max_frame_size(Some(MAX_SERVICE_MESSAGE_BYTES));
     match tokio_tungstenite::connect_async_with_config(request, Some(config), true).await {
         Ok((ws, _)) => {
-            let conn = Conn::start(ws, true, tasks);
-            hooks.opened(Opened::of(url, &conn));
+            let conn = Conn::start(ws, hooks.spies(), tasks);
+            if let Some(spied) = &conn.spied {
+                hooks.opened(Opened::of(url, &conn, spied));
+            }
             Ok(conn)
         }
         Err(WsError::Http(response)) => {
@@ -363,10 +365,10 @@ pub struct Opened {
 }
 
 impl Opened {
-    fn of(url: &str, conn: &Conn) -> Opened {
+    fn of(url: &str, conn: &Conn, spied: &Arc<Spied>) -> Opened {
         Opened {
             url: url.to_owned(),
-            spied: conn.spied.clone().expect("a socket a device opened is spied on"),
+            spied: spied.clone(),
             out: conn.out.clone(),
             closed: conn.closed.clone(),
             ends: conn.ends.clone(),
@@ -452,5 +454,21 @@ mod tests {
             pieces += 1;
         }
         assert_eq!(pieces, 64);
+    }
+
+    #[tokio::test]
+    async fn a_socket_an_app_opens_keeps_nothing_it_sent() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let accepting = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        });
+        let tasks = TaskTracker::new();
+        let hooks: Arc<dyn Hooks> = Arc::new(crate::testing::NoHooks);
+        let conn = open(&url, Vec::new(), &hooks, &tasks).await.unwrap();
+        let _far = accepting.await.unwrap();
+        conn.send(Msg::Text("hello".into()));
+        assert!(conn.spied.is_none());
     }
 }

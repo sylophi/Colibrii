@@ -72,6 +72,10 @@ impl Hooks for Desk {
         self.net.headers()
     }
 
+    fn spies(&self) -> bool {
+        self.net.spies()
+    }
+
     fn opened(&self, socket: Opened) {
         self.net.opened(socket)
     }

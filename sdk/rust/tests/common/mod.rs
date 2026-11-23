@@ -163,6 +163,10 @@ impl Hooks for Net {
         !*self.refusing.lock().unwrap()
     }
 
+    fn spies(&self) -> bool {
+        true
+    }
+
     fn opened(&self, socket: Opened) {
         self.opened.lock().unwrap().push(socket);
     }
