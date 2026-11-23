@@ -843,13 +843,7 @@ while :; do sleep 1; done
         assert!(is_alive(other.0.id()));
         leftover(pid_record(stale.0.id()).await).await;
         let mut stale = stale;
-        timeout(WAIT, async {
-            while stale.0.try_wait().unwrap().is_none() {
-                sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .expect("ended in time");
+        until(|| stale.0.try_wait().unwrap().is_some()).await;
         drop(other);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -860,13 +854,7 @@ while :; do sleep 1; done
         let mut stale = sleeper();
         std::fs::write(path.join(PID_FILE), pid_record(stale.0.id()).await).unwrap();
         end_leftover_cloudflared(&path).await;
-        timeout(WAIT, async {
-            while stale.0.try_wait().unwrap().is_none() {
-                sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .expect("ended in time");
+        until(|| stale.0.try_wait().unwrap().is_some()).await;
         assert!(!path.join(PID_FILE).exists());
         std::fs::remove_dir_all(path).unwrap();
     }

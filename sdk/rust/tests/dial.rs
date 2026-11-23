@@ -53,15 +53,7 @@ where
 }
 
 async fn pair(kit: &Kit) -> Pair {
-    let account = new_account_id();
-    let desk = Device::new(listening(kit)).await.unwrap();
-    let links = welcome_all(&desk);
-    let phone = kit.device().await;
-    let desk_id = device_id_of(&kit.enroll(&desk, &account, "Desk").await);
-    let phone_id = device_id_of(&kit.enroll(&phone, &account, "Phone").await);
-    sees(&phone, &desk_id).await;
-    sees(&desk, &phone_id).await;
-    Pair { account, desk, phone, desk_id, phone_id, links }
+    pair_with(kit, kit, welcome).await
 }
 
 type Deciding = std::pin::Pin<Box<dyn std::future::Future<Output = Option<Link>> + Send>>;
@@ -291,7 +283,7 @@ async fn closes_when_the_peer_is_removed() {
     // leaves the link to it.
     assert_eq!(dialed.closed().await, LinkClosed { code: 1001, cause: LinkCloseCause::Stopped });
     assert_eq!(admitted.closed().await, LinkClosed { code: 1001, cause: LinkCloseCause::Peer });
-    wait_for(&pair.phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    signed_out(&pair.phone).await;
 }
 
 #[tokio::test]
@@ -434,13 +426,7 @@ async fn takes_a_link_from_a_peer_missing_from_a_roster_not_yet_settled_until_it
     assert!(matches!(phone.account().get(), AccountState::Enrolled { connected: true, settled: false, .. }));
     decided.notify_one();
     let link = dial.await.unwrap().unwrap();
-    let mut account = phone.account();
-    timeout(
-        Duration::from_secs(12),
-        account.wait_for(|state| matches!(state, AccountState::Enrolled { settled: true, .. })),
-    )
-    .await
-    .unwrap();
+    settled(&phone).await;
     assert_eq!(
         closed_within(&link, Duration::from_secs(1)).await,
         Some(LinkClosed { code: 1001, cause: LinkCloseCause::LeftRoster })
@@ -484,13 +470,7 @@ async fn keeps_a_link_to_a_peer_missing_from_the_roster_until_the_roster_settled
     wait_for(&pair.desk.roster(), |peers| peers.is_empty()).await;
     assert!(matches!(pair.desk.account().get(), AccountState::Enrolled { connected: true, settled: false, .. }));
     assert_eq!(closed_within(&admitted, Duration::from_secs(1)).await, None);
-    let mut account = pair.desk.account();
-    timeout(
-        Duration::from_secs(12),
-        account.wait_for(|state| matches!(state, AccountState::Enrolled { settled: true, .. })),
-    )
-    .await
-    .unwrap();
+    settled(&pair.desk).await;
     assert_eq!(
         closed_within(&admitted, Duration::from_secs(1)).await,
         Some(LinkClosed { code: 1001, cause: LinkCloseCause::LeftRoster })
@@ -500,14 +480,7 @@ async fn keeps_a_link_to_a_peer_missing_from_the_roster_until_the_roster_settled
 #[tokio::test]
 async fn closes_when_the_roster_gives_the_peer_another_key() {
     let (desk_kit, phone_kit) = (Kit::new(), Kit::new());
-    let account = new_account_id();
-    let desk = Device::new(listening(&desk_kit)).await.unwrap();
-    let _links = welcome_all(&desk);
-    let phone = phone_kit.device().await;
-    let desk_id = device_id_of(&desk_kit.enroll(&desk, &account, "Desk").await);
-    phone_kit.enroll(&phone, &account, "Phone").await;
-    sees(&phone, &desk_id).await;
-    wait_for(&desk.roster(), |peers| !peers.is_empty()).await;
+    let Pair { account, desk, phone, desk_id, links: _links, .. } = pair_with(&desk_kit, &phone_kit, welcome).await;
     let dialed = phone.dial(&desk_id, b"hi").await.unwrap();
 
     // The phone's hub socket goes down and stays down while the desk
@@ -718,14 +691,6 @@ async fn the_listener_closes_a_socket_that_sends_a_message_past_the_cap_before_a
     let desk = Device::new(listening(&kit)).await.unwrap();
     kit.enroll(&desk, &new_account_id(), "Desk").await;
     let port = *kit.net.ports.lock().unwrap().last().unwrap();
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}")).await.unwrap();
-    ws.send(Message::binary(vec![0u8; 70_000])).await.unwrap();
-    let mut code = None;
-    while let Some(Ok(message)) = ws.next().await {
-        if let Message::Close(frame) = message {
-            code = frame.map(|frame| u16::from(frame.code));
-            break;
-        }
-    }
-    assert_eq!(code, Some(1009));
+    let ended = raw_socket(&format!("ws://127.0.0.1:{port}"), None, Some(vec![0u8; 70_000])).await;
+    assert_eq!(ended, (None, Some(1009)));
 }

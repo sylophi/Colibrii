@@ -238,6 +238,18 @@ pub async fn connected(device: &Device) -> AccountState {
     wait_for(&device.account(), |state| matches!(state, AccountState::Enrolled { connected: true, .. })).await
 }
 
+/// Until `device` reads as signed out.
+pub async fn signed_out(device: &Device) -> AccountState {
+    wait_for(&device.account(), |state| matches!(state, AccountState::SignedOut { .. })).await
+}
+
+/// Until the 10 seconds after `device`'s hub socket connected are over.
+pub async fn settled(device: &Device) {
+    let mut account = device.account();
+    let settled = account.wait_for(|state| matches!(state, AccountState::Enrolled { settled: true, .. }));
+    tokio::time::timeout(Duration::from_secs(12), settled).await.expect("in time");
+}
+
 /// Runs `check` until it passes.
 pub async fn eventually<F: Future<Output = bool>>(mut check: impl FnMut() -> F) {
     tokio::time::timeout(WAIT, async {
@@ -302,13 +314,16 @@ where
     received
 }
 
-/// Welcomes every hello with "welcome " and its app hello.
+/// Welcomes the hello with "welcome " and its app hello.
+pub async fn welcome(hello: colibrii::IncomingHello) -> Option<colibrii::Link> {
+    let mut welcome = b"welcome ".to_vec();
+    welcome.extend_from_slice(&hello.app_hello);
+    hello.welcome(welcome).await
+}
+
+/// Welcomes every hello, as `welcome` does.
 pub fn welcome_all(device: &Device) -> tokio::sync::mpsc::UnboundedReceiver<colibrii::Link> {
-    serve(device, |hello| async move {
-        let mut welcome = b"welcome ".to_vec();
-        welcome.extend_from_slice(&hello.app_hello);
-        hello.welcome(welcome).await
-    })
+    serve(device, welcome)
 }
 
 pub async fn next_link(links: &mut tokio::sync::mpsc::UnboundedReceiver<colibrii::Link>) -> colibrii::Link {

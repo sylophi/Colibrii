@@ -258,7 +258,7 @@ async fn reads_as_signed_out_once_another_device_removes_it() {
     kit.enroll(&desk, &account, "Desk").await;
     let phone_id = device_id_of(&kit.enroll(&phone, &account, "Phone").await);
     desk.devices().remove(&phone_id).await.unwrap();
-    let removed = wait_for(&phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    let removed = signed_out(&phone).await;
     assert_eq!(removed, REMOVED);
     assert_eq!(document(&store), Some(json!({ "deviceId": phone_id, "removed": true })));
     assert_eq!(phone.devices().list().await.unwrap_err(), Error::NotEnrolled);
@@ -298,7 +298,7 @@ async fn removed_in(kit: &Kit, store: &Arc<MemoryStore>) -> String {
     kit.enroll(&desk, &account, "Desk").await;
     let phone = kit.device_in(store).await;
     desk.devices().remove(&device_id_of(&kit.enroll(&phone, &account, "Phone").await)).await.unwrap();
-    wait_for(&phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    signed_out(&phone).await;
     phone.close().await;
     desk.close().await;
     account
@@ -325,7 +325,7 @@ async fn a_removal_is_kept_by_a_device_that_learns_of_it_as_it_starts() {
     first.close().await;
     desk.devices().remove(&phone_id).await.unwrap();
     let phone = kit.device_in(&store).await;
-    wait_for(&phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    signed_out(&phone).await;
     phone.close().await;
     let later = kit.device_in(&store).await;
     assert_eq!(later.account().get(), REMOVED);
@@ -375,7 +375,7 @@ async fn runs_the_enrollment_another_run_made_since() {
     let quick = multi_in(&kit, &store).await;
     connected(&quick).await;
     desk.devices().remove(&phone_id).await.unwrap();
-    wait_for(&quick.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    signed_out(&quick).await;
     let enrolled = kit.enroll(&quick, &account, "Phone").await;
     // The old credential, which the service no longer takes.
     slow.devices().list().await.unwrap_err();
@@ -454,10 +454,5 @@ async fn settles_ten_seconds_after_it_connects() {
     let desk = kit.device().await;
     kit.enroll(&desk, &new_account_id(), "Desk").await;
     assert!(matches!(desk.account().get(), AccountState::Enrolled { settled: false, .. }));
-    let mut account = desk.account();
-    let settled = tokio::time::timeout(
-        std::time::Duration::from_secs(12),
-        account.wait_for(|state| matches!(state, AccountState::Enrolled { settled: true, .. })),
-    );
-    assert!(settled.await.is_ok());
+    settled(&desk).await;
 }
