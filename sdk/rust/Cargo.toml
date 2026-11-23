@@ -8,6 +8,11 @@ description = "The device side of Colibrii, which connects a person's devices to
 repository = "https://github.com/sylophi/Colibrii"
 
 [dependencies]
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+tokio-util = "0.7.20"
 chacha20poly1305 = { version = "0.11.0", default-features = false, features = ["alloc"] }
 getrandom = "0.4.3"
 hkdf = "0.13.0"
@@ -18,3 +23,4 @@ x25519-dalek = { version = "3.0.0", default-features = false, features = ["preco
 
 [dev-dependencies]
 sha2 = "0.11.1"
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }

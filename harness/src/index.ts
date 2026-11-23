@@ -44,8 +44,8 @@ const apps = [
 ];
 
 // It serves `served` in place of the two apps, to test the instance's
-// own checks.
-export const startService = async (served: ReadonlyArray<object> = apps) => {
+// own checks. `close` stops it.
+export const serve = async (served: ReadonlyArray<object> = apps) => {
   const server = createTestHarness({
     root: serviceDir,
     workers: [
@@ -63,8 +63,14 @@ export const startService = async (served: ReadonlyArray<object> = apps) => {
   const { url } = await server.listen();
   const worker = server.getWorker();
   await worker.applyD1Migrations("DB");
-  afterAll(() => server.close());
-  return { url: url.href, worker };
+  return { url: url.href, worker, close: () => server.close() };
+};
+
+// The service for a vitest file, stopped once its tests are done.
+export const startService = async (served: ReadonlyArray<object> = apps) => {
+  const service = await serve(served);
+  afterAll(() => service.close());
+  return service;
 };
 
 // ---- Login tokens ----
