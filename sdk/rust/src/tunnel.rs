@@ -699,7 +699,8 @@ while :; do sleep 1; done
         assert_eq!(first.args, "tunnel --no-autoupdate --ha-connections 1 run");
         assert_eq!(first.token, TOKEN);
         assert!(first.logs_to_file);
-        assert_eq!(std::fs::read_to_string(path.join(PID_FILE)).unwrap(), pid_record(first.pid).await);
+        let record = pid_record(first.pid).await;
+        until(|| std::fs::read_to_string(path.join(PID_FILE)).is_ok_and(|read| read == record)).await;
         edge.status.store(426, Ordering::SeqCst);
         assert_eq!(tunnel.status(is_up).await, TunnelState::Up { hostname: HOSTNAME.into() });
         tunnel.end().await;
