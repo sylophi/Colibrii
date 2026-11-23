@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use reqwest::Method;
@@ -75,7 +75,23 @@ pub(crate) type SettledSweep = Box<dyn Fn(&HashSet<String>) + Send + Sync>;
 #[derive(Default)]
 struct Links {
     ended: bool,
-    all: Vec<Arc<LiveLink>>,
+    /// Each until it ends, held as long as anything else holds it.
+    all: Vec<Weak<LiveLink>>,
+}
+
+impl Links {
+    /// The links that have not ended, the rest let go.
+    fn live(&mut self) -> Vec<Arc<LiveLink>> {
+        let mut live = Vec::new();
+        self.all.retain(|link| match link.upgrade().filter(|link| !link.is_ended()) {
+            Some(link) => {
+                live.push(link);
+                true
+            }
+            None => false,
+        });
+        live
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,21 +173,19 @@ impl Shared {
             if !named {
                 return Join::Refused;
             }
-            links.all.retain(|other| !other.is_ended());
+            let others = links.live();
             let replaced = match replacing {
                 None => Vec::new(),
-                Some(connections) => links
-                    .all
-                    .iter()
+                Some(connections) => others
+                    .into_iter()
                     .filter(|other| {
                         other.role == Role::Listener
                             && other.device_id == link.device_id
                             && (connections == Connections::Single || other.connection_id == link.connection_id)
                     })
-                    .cloned()
                     .collect(),
             };
-            links.all.push(link.clone());
+            links.all.push(Arc::downgrade(link));
             replaced
         };
         for other in replaced {
@@ -183,7 +197,7 @@ impl Shared {
     /// A live roster ends the links of a peer that left it, once settled,
     /// or that it gives another key.
     fn sweep(&self, roster: &Roster) {
-        let links: Vec<_> = self.links.lock().unwrap().all.clone();
+        let links = self.links.lock().unwrap().live();
         for link in links {
             let gone = match roster.get(&link.device_id) {
                 None => roster.settled,
@@ -200,7 +214,9 @@ impl Shared {
         let links = {
             let mut links = self.links.lock().unwrap();
             links.ended = true;
-            std::mem::take(&mut links.all)
+            let live = links.live();
+            links.all.clear();
+            live
         };
         for link in links {
             link.end(CLOSE_GOING_AWAY, LinkCloseCause::Stopped);
@@ -570,10 +586,10 @@ impl HubSocket {
             .lock()
             .unwrap()
             .insert(id.clone(), Pending { device_id: device_id.to_owned(), handshake, answered });
-        let frame = encode_relay_frame(&RelayFrame { kind: FrameKind::Ask, id: id.clone(), sealed });
+        let _asked = Asked { live: current.clone(), id: id.clone() };
+        let frame = encode_relay_frame(&RelayFrame { kind: FrameKind::Ask, id, sealed });
         current.conn.send(Msg::Text(encode_relay(device_id, &frame)));
         let answer = timeout(Duration::from_millis(ASK_TIMEOUT_MS), answer).await;
-        current.pending.lock().unwrap().remove(&id);
         match answer {
             Err(_) => Err(DialError::TimedOut),
             Ok(Err(_)) => Err(DialError::NotConnected),
@@ -586,6 +602,18 @@ impl HubSocket {
             Ok(Ok(Ok(Answer::Refused(code)))) if code == "no-listener" => Err(DialError::NoListener),
             Ok(Ok(Ok(Answer::Refused(code)))) => Err(DialError::unreachable(code)),
         }
+    }
+}
+
+/// An ask's place among those waiting, until the asker stops waiting.
+struct Asked {
+    live: Arc<Live>,
+    id: String,
+}
+
+impl Drop for Asked {
+    fn drop(&mut self) {
+        self.live.pending.lock().unwrap().remove(&self.id);
     }
 }
 
@@ -680,6 +708,32 @@ mod tests {
             first.end(CLOSE_GOING_AWAY, LinkCloseCause::Stopped);
             second.end(CLOSE_GOING_AWAY, LinkCloseCause::Stopped);
         }
+    }
+
+    #[tokio::test]
+    async fn an_ask_given_up_on_leaves_nothing_waiting() {
+        let device = fakes::device().await;
+        let attempt = FakeAttempt::new(device.inner(), Shared::new()).await;
+        let peer = fakes::ids().0;
+        attempt.hear(&fakes::presence(&[(&peer, KeyPair::generate().public_key)]));
+        let input = ConnectInfoInput { dialable_kinds: Vec::new(), connection_id: fakes::ids().1 };
+        assert!(timeout(Duration::from_millis(20), attempt.hub.ask(&peer, input)).await.is_err());
+        assert!(attempt.live.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_link_that_ended_is_let_go() {
+        let device = fakes::device().await;
+        let (inner, shared) = (device.inner().clone(), Shared::new());
+        let attempt = FakeAttempt::new(&inner, shared.clone()).await;
+        let (peer, key) = (fakes::ids().0, KeyPair::generate().public_key);
+        attempt.hear(&fakes::presence(&[(&peer, key)]));
+        let (link, _far) = fakes::listened(&inner, &peer, &fakes::ids().1, key).await;
+        assert_eq!(shared.join(&link, None), Join::Joined);
+        let held = Arc::downgrade(&link);
+        link.end(CLOSE_GOING_AWAY, LinkCloseCause::Closed);
+        drop(link);
+        assert!(held.upgrade().is_none());
     }
 
     fn after(uptime: u64, wait_at_least: u64) -> Run {
