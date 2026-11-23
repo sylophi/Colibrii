@@ -38,7 +38,8 @@ export type Removed = typeof Removed.Type;
 export const Stored = Schema.Union([Enrollment, Owed, Removed]);
 export type Stored = typeof Stored.Type;
 
-export const isOwed = (stored: Stored): stored is Owed => "signedOut" in stored;
+export const isOwed = (stored: Stored | null): stored is Owed =>
+  stored !== null && "signedOut" in stored;
 
 export const isRemoved = (stored: Stored | null): stored is Removed =>
   stored !== null && "removed" in stored;

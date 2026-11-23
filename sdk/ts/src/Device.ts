@@ -546,12 +546,12 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
 
   const deliverOwed = Effect.gen(function* () {
     const stored = yield* readStored;
-    if (stored === null || !Stored.isOwed(stored)) return;
+    if (!Stored.isOwed(stored)) return;
     yield* locked(
       Effect.gen(function* () {
         // Another run sharing the store may have delivered it since.
         const now = yield* readStored;
-        if (now !== null && Stored.isOwed(now)) yield* deliver(now);
+        if (Stored.isOwed(now)) yield* deliver(now);
       }),
     );
   }).pipe(Effect.ignore, Effect.provideContext(services));
@@ -617,8 +617,7 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
               }
               return;
             }
-            const owed =
-              stored !== null && Stored.isOwed(stored) ? stored : null;
+            const owed = Stored.isOwed(stored) ? stored : null;
             const owing = owed !== null && !(yield* deliver(owed));
             // A removal still owed keeps its device id, so enrolling
             // replaces the credential it was for, or meets
