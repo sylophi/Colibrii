@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Method;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::errors::Error;
 use crate::testing::Hooks;
-use crate::wire::api::{ServiceError, VERSION_HEADER, WIRE_VERSION};
+use crate::wire::api::{ServiceError, SignInTokenRequest, SignInTokenResponse, VERSION_HEADER, WIRE_VERSION};
 
 /// How long a call waits for its answer.
 pub(crate) const ANSWER_WITHIN: Duration = Duration::from_secs(15);
@@ -96,31 +96,21 @@ impl HubApi {
             return Err(Error::RateLimited { retry_after_seconds: retry_after_of(retry_after.as_deref()) });
         }
         let json = if bytes.is_empty() { Some(Value::Null) } else { serde_json::from_slice(&bytes).ok() };
+        let unreadable = || Error::HubUnreachable(format!("an unreadable answer ({status})"));
         if (200..300).contains(&status) {
-            return json.ok_or_else(|| Error::HubUnreachable(format!("an unreadable answer ({status})")));
+            return json.ok_or_else(unreadable);
         }
         match json.as_ref().and_then(ServiceError::decode) {
             Some(error) if error.status() == status && errors.contains(&error.tag()) => Err(Error::Service(error)),
-            _ => Err(Error::HubUnreachable(format!("an unreadable answer ({status})"))),
+            _ => Err(unreadable()),
         }
     }
 
     /// `POST /sign-in-token`.
     pub async fn sign_in_token(&self, app: &str, access_token: &str) -> Result<String, Error> {
-        let answer = self
-            .call(
-                Method::POST,
-                "/sign-in-token",
-                access_token,
-                Some(&crate::wire::api::SignInTokenRequest { app: app.to_owned() }),
-                SIGN_IN_TOKEN,
-            )
-            .await?;
-        answer
-            .get("token")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| Error::HubUnreachable("an unreadable answer".into()))
+        let request = SignInTokenRequest { app: app.to_owned() };
+        let answer = self.call(Method::POST, "/sign-in-token", access_token, Some(&request), SIGN_IN_TOKEN).await?;
+        SignInTokenResponse::deserialize(answer).map(|answer| answer.token).map_err(|_| Error::unreadable())
     }
 }
 

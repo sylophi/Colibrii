@@ -66,6 +66,11 @@ impl Error {
     pub(crate) fn store(operation: StoreOperation, error: std::io::Error) -> Error {
         Error::Store { operation, message: error.to_string() }
     }
+
+    /// An answer the wire does not describe.
+    pub(crate) fn unreadable() -> Error {
+        Error::HubUnreachable("an unreadable answer".into())
+    }
 }
 
 impl fmt::Display for Error {

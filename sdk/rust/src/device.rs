@@ -379,9 +379,7 @@ impl Devices<'_> {
             .run(|inner| async move {
                 let answer =
                     inner.with_credential(Method::GET, "/devices".into(), None::<&()>, hub_api::DEVICE).await?;
-                DeviceList::decode(&answer)
-                    .map(|list| list.devices)
-                    .ok_or_else(|| Error::HubUnreachable("an unreadable answer".into()))
+                DeviceList::decode(&answer).map(|list| list.devices).ok_or_else(Error::unreadable)
             })
             .await
     }
@@ -702,7 +700,7 @@ impl Inner {
         };
         let answer =
             self.api.call(Method::POST, "/devices/enroll", login_token, Some(&request), hub_api::ENROLL).await?;
-        EnrollResponse::decode(&answer).ok_or_else(|| Error::HubUnreachable("an unreadable answer".into()))
+        EnrollResponse::decode(&answer).ok_or_else(Error::unreadable)
     }
 
     async fn sign_out(self: &Arc<Self>) -> Result<bool, Error> {

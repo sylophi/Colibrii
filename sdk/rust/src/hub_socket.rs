@@ -197,12 +197,8 @@ struct Live {
 
 impl Live {
     fn fail(&self, which: impl Fn(&Pending) -> bool, error: DialError) {
-        let mut pending = self.pending.lock().unwrap();
-        let ids: Vec<String> = pending.iter().filter(|(_, entry)| which(entry)).map(|(id, _)| id.clone()).collect();
-        for id in ids {
-            if let Some(entry) = pending.remove(&id) {
-                let _ = entry.answered.send(Err(error.clone()));
-            }
+        for (_, entry) in self.pending.lock().unwrap().extract_if(|_, entry| which(entry)) {
+            let _ = entry.answered.send(Err(error.clone()));
         }
     }
 }
