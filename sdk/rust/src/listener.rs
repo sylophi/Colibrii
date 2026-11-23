@@ -422,8 +422,11 @@ impl Listener {
             app_hello: hello.app_hello.clone(),
             decide,
         });
-        let decision = decided.await.unwrap_or(Decision::Refuse { reason: "refused".into(), app_refusal: None });
         // The peer went, or left the roster, while the app decided.
+        let decision = tokio::select! {
+            decision = decided => decision.unwrap_or(Decision::Refuse { reason: "refused".into(), app_refusal: None }),
+            _ = conn.closed() => return None,
+        };
         if !conn.is_open() {
             return None;
         }
