@@ -385,6 +385,27 @@ async fn connects_again_after_the_service_drops_it() {
 }
 
 #[tokio::test]
+async fn connects_again_at_once_on_a_wake_while_its_hub_socket_is_down() {
+    let kit = Kit::new();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &new_account_id(), "Desk").await;
+    let tickets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = tickets.clone();
+    kit.net.set_divert(move |method, url| {
+        let ticket = method == "POST" && url.ends_with("/tickets");
+        (ticket && counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 3).then_some(Diversion::Refused)
+    });
+    kit.net.hub_socket().send(Msg::Text("x".repeat(70_000)));
+    // Three tries refused, after waits of 1, 2 and 4 seconds: the next is 8
+    // seconds away.
+    eventually(|| async { tickets.load(std::sync::atomic::Ordering::SeqCst) == 3 }).await;
+    desk.wake();
+    let mut account = desk.account();
+    let again = account.wait_for(|state| matches!(state, AccountState::Enrolled { connected: true, .. }));
+    assert!(tokio::time::timeout(std::time::Duration::from_secs(3), again).await.is_ok());
+}
+
+#[tokio::test]
 async fn settles_ten_seconds_after_it_connects() {
     let kit = Kit::new();
     let desk = kit.device().await;

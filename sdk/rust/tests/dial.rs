@@ -221,6 +221,17 @@ async fn lets_a_dialed_link_go_once_it_closed() {
 }
 
 #[tokio::test]
+async fn pings_at_once_on_a_wake() {
+    let kit = Kit::new();
+    let pair = pair(&kit).await;
+    let _dialed = pair.phone.dial(&pair.desk_id, b"hi").await.unwrap();
+    let socket = winner(&kit);
+    let sent = socket.sent().len();
+    pair.phone.wake();
+    eventually(|| async { socket.sent().len() > sent }).await;
+}
+
+#[tokio::test]
 async fn gives_the_dialer_the_apps_refusal_and_its_bytes() {
     let kit = Kit::new();
     let pair = pair_with(&kit, &kit, |hello| async move {

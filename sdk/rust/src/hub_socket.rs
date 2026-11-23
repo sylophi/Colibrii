@@ -224,6 +224,33 @@ struct Run {
     wait_at_least: Duration,
 }
 
+/// The reconnect ladder: 1, 2, 4, 8, then 16 seconds, staying at 16, and
+/// starting over after a run that stayed up 30 seconds.
+#[derive(Default)]
+struct Ladder {
+    rung: usize,
+}
+
+impl Ladder {
+    /// Waits before the attempt after `run`. A wake cuts a wait on the
+    /// ladder short, never one the far end asked for.
+    async fn wait(&mut self, run: &Run, mut wakes: watch::Receiver<u64>) {
+        if run.uptime >= Duration::from_millis(REDIAL_RESET_AFTER_MS) {
+            self.rung = 0;
+        }
+        let delay = Duration::from_millis(REDIAL_DELAYS_MS[self.rung.min(REDIAL_DELAYS_MS.len() - 1)]);
+        self.rung += 1;
+        if run.wait_at_least > Duration::ZERO {
+            sleep(delay.max(run.wait_at_least)).await;
+        } else {
+            tokio::select! {
+                _ = sleep(delay) => {}
+                Ok(()) = wakes.changed() => {}
+            }
+        }
+    }
+}
+
 fn failed(wait_at_least: Duration) -> Result<Run, Stop> {
     Ok(Run { uptime: Duration::ZERO, wait_at_least })
 }
@@ -317,26 +344,13 @@ impl HubSocket {
     /// 30 seconds. A wake cuts a wait on the ladder short, never one the far
     /// end asked for. Returns why the device stops.
     pub async fn run(self: Arc<Self>) -> Stop {
-        let mut rung = 0;
+        let mut ladder = Ladder::default();
         loop {
             let run = match self.clone().attempt().await {
                 Ok(run) => run,
                 Err(stop) => return stop,
             };
-            if run.uptime >= Duration::from_millis(REDIAL_RESET_AFTER_MS) {
-                rung = 0;
-            }
-            let delay = Duration::from_millis(REDIAL_DELAYS_MS[rung.min(REDIAL_DELAYS_MS.len() - 1)]);
-            rung += 1;
-            if run.wait_at_least > Duration::ZERO {
-                sleep(delay.max(run.wait_at_least)).await;
-            } else {
-                let mut wakes = self.inner.wakes.subscribe();
-                tokio::select! {
-                    _ = sleep(delay) => {}
-                    Ok(()) = wakes.changed() => {}
-                }
-            }
+            ladder.wait(&run, self.inner.wakes.subscribe()).await;
         }
     }
 
@@ -550,4 +564,59 @@ fn read_answer(current: &Live, from: &str, frame: &RelayFrame) {
     let answer = open_answer(&mut entry.handshake, &frame.sealed)
         .ok_or_else(|| DialError::unreachable("the answer could not be read"));
     let _ = entry.answered.send(answer);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn after(uptime: u64, wait_at_least: u64) -> Run {
+        Run { uptime: Duration::from_secs(uptime), wait_at_least: Duration::from_secs(wait_at_least) }
+    }
+
+    /// How long `ladder` waits after `run`, in whole seconds.
+    async fn waited(ladder: &mut Ladder, run: Run, wakes: &watch::Sender<u64>) -> u64 {
+        let started = Instant::now();
+        ladder.wait(&run, wakes.subscribe()).await;
+        started.elapsed().as_secs()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn climbs_1_2_4_8_16_and_starts_over_after_a_run_up_30_seconds() {
+        let wakes = watch::channel(0).0;
+        let mut ladder = Ladder::default();
+        let mut waits = Vec::new();
+        for _ in 0..6 {
+            waits.push(waited(&mut ladder, after(0, 0), &wakes).await);
+        }
+        waits.push(waited(&mut ladder, after(29, 0), &wakes).await);
+        waits.push(waited(&mut ladder, after(30, 0), &wakes).await);
+        assert_eq!(waits, [1, 2, 4, 8, 16, 16, 16, 1]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn waits_at_least_what_the_far_end_asked_for() {
+        let wakes = watch::channel(0).0;
+        let mut ladder = Ladder::default();
+        assert_eq!(waited(&mut ladder, after(0, 7), &wakes).await, 7);
+        assert_eq!(waited(&mut ladder, after(0, 1), &wakes).await, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wake_cuts_a_wait_on_the_ladder_short_and_never_one_the_far_end_asked_for() {
+        let wakes = watch::channel(0).0;
+        let mut ladder = Ladder { rung: 4 };
+        let waking = async {
+            sleep(Duration::from_secs(3)).await;
+            wakes.send_modify(|count| *count += 1);
+        };
+        let (cut, ()) = tokio::join!(waited(&mut ladder, after(0, 0), &wakes), waking);
+        assert_eq!(cut, 3);
+        let waking = async {
+            sleep(Duration::from_secs(3)).await;
+            wakes.send_modify(|count| *count += 1);
+        };
+        let (asked, ()) = tokio::join!(waited(&mut ladder, after(0, 20), &wakes), waking);
+        assert_eq!(asked, 20);
+    }
 }

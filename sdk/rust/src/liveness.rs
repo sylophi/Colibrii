@@ -89,3 +89,107 @@ pub(crate) async fn silence(heard: &Heard) {
         sleep(LISTENER_SILENT - quiet).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::*;
+
+    /// The far end, answering each ping while `answers` holds.
+    struct Far {
+        heard: Heard,
+        pings: AtomicU32,
+        answers: std::sync::atomic::AtomicBool,
+    }
+
+    impl Far {
+        fn new(answers: bool) -> Far {
+            Far { heard: Heard::new(), pings: AtomicU32::new(0), answers: answers.into() }
+        }
+
+        fn ping(&self) {
+            self.pings.fetch_add(1, Ordering::SeqCst);
+            if self.answers.load(Ordering::SeqCst) {
+                self.heard.hear();
+            }
+        }
+    }
+
+    /// When `watch` returned, in whole seconds, if within `limit`.
+    async fn dead_after(far: &Far, wakes: watch::Receiver<u64>, limit: u64) -> Option<u64> {
+        let started = Instant::now();
+        let watched = tokio::time::timeout(Duration::from_secs(limit), watch(|| far.ping(), &far.heard, wakes));
+        watched.await.ok().map(|()| started.elapsed().as_secs())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pings_every_15_seconds_while_the_far_end_answers() {
+        let far = Far::new(true);
+        let wakes = watch::channel(0);
+        assert_eq!(dead_after(&far, wakes.1, 61).await, None);
+        assert_eq!(far.pings.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn is_dead_40_seconds_after_an_unanswered_ping_and_5_more_after_a_second() {
+        let far = Far::new(false);
+        let wakes = watch::channel(0);
+        // The first ping at 15, the second at 55, nothing back by 60.
+        assert_eq!(dead_after(&far, wakes.1, 120).await, Some(60));
+        assert_eq!(far.pings.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lives_on_while_anything_arrives_after_an_unanswered_ping() {
+        let far = Far::new(false);
+        let wakes = watch::channel(0);
+        let chatter = async {
+            for _ in 0..12 {
+                sleep(Duration::from_secs(10)).await;
+                far.heard.hear();
+            }
+        };
+        let (dead, ()) = tokio::join!(dead_after(&far, wakes.1, 121), chatter);
+        assert_eq!(dead, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pings_at_once_on_a_wake_and_is_dead_when_that_goes_unanswered() {
+        let far = Far::new(false);
+        let wakes = watch::channel(0);
+        let waking = async {
+            sleep(Duration::from_secs(2)).await;
+            wakes.0.send_modify(|count| *count += 1);
+        };
+        let (dead, ()) = tokio::join!(dead_after(&far, wakes.1.clone(), 120), waking);
+        assert_eq!(dead, Some(7));
+        assert_eq!(far.pings.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lives_on_after_a_wake_whose_ping_is_answered() {
+        let far = Far::new(true);
+        let wakes = watch::channel(0);
+        let waking = async {
+            sleep(Duration::from_secs(2)).await;
+            wakes.0.send_modify(|count| *count += 1);
+        };
+        let (dead, ()) = tokio::join!(dead_after(&far, wakes.1.clone(), 30), waking);
+        assert_eq!(dead, None);
+        // The wake's at 2, then every 15 seconds from its answer at 7.
+        assert_eq!(far.pings.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_listeners_limit_is_120_seconds_of_silence() {
+        let heard = Heard::new();
+        let started = Instant::now();
+        let talking = async {
+            sleep(Duration::from_secs(100)).await;
+            heard.hear();
+        };
+        tokio::join!(silence(&heard), talking);
+        assert_eq!(started.elapsed().as_secs(), 220);
+    }
+}
