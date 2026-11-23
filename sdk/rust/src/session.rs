@@ -186,11 +186,12 @@ mod tests {
         let session = Session::start(inner.clone(), enrollment).await.unwrap();
         let attempt = FakeAttempt::new(&inner, session.shared.clone()).await;
         let (peer, connection_id) = fakes::ids();
-        let (link, key, _far) = fakes::listened(&inner, &peer, &connection_id).await;
+        let key = KeyPair::generate().public_key;
+        let (link, _far) = fakes::listened(&inner, &peer, &connection_id, key).await;
         let (with, without) = (fakes::presence(&[(&peer, key)]), fakes::presence(&[]));
         attempt.hear(&with);
         attempt.settle();
-        assert_eq!(session.shared.join(&link), Join::Joined);
+        assert_eq!(session.shared.join(&link, None), Join::Joined);
         attempt.hear(&without);
         attempt.hear(&with);
         tokio::task::yield_now().await;

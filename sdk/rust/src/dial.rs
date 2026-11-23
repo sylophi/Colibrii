@@ -145,7 +145,7 @@ pub(crate) async fn dial(
         greeting: won.app_welcome,
     });
     // The roster may have moved on, or gone, while the race ran.
-    match shared.join(&link) {
+    match shared.join(&link, None) {
         Join::Joined => {
             link.run(inner);
             Ok(Link::of(link))

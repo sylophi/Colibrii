@@ -139,36 +139,45 @@ impl Shared {
     /// chose its peer from the roster moments ago, so it leaves one missing
     /// from a roster not yet settled to the sweep, as it does an older
     /// link.
-    pub fn join(&self, link: &Arc<LiveLink>) -> Join {
-        let mut links = self.links.lock().unwrap();
-        let roster = self.roster.borrow();
-        let Some(roster) = roster.as_ref().filter(|_| !links.ended) else { return Join::Unavailable };
-        let named = match roster.get(&link.device_id) {
-            None => link.role == Role::Dialer && !roster.settled,
-            Some(peer) => same_key(&peer.public_key, &link.peer_key),
-        };
-        if !named {
-            return Join::Refused;
-        }
-        links.all.retain(|other| !other.is_ended());
-        links.all.push(link.clone());
-        Join::Joined
-    }
-
-    /// Ends the links a new one from the same peer replaces: every other
-    /// one this device listened for when the peer is `single`, or the one
-    /// with the same connection id when it is `multi`.
-    pub fn replace(&self, link: &Arc<LiveLink>, connections: Connections) {
-        let others: Vec<_> = self.links.lock().unwrap().all.clone();
-        for other in others {
-            if !Arc::ptr_eq(&other, link)
-                && other.role == Role::Listener
-                && other.device_id == link.device_id
-                && (connections == Connections::Single || other.connection_id == link.connection_id)
-            {
-                other.end(CLOSE_GOING_AWAY, LinkCloseCause::Replaced);
+    ///
+    /// A link this device listened for joins `replacing` the ones it
+    /// replaces, by its peer's `connections`: every other one this device
+    /// listened for from that peer when `single`, or the one with the same
+    /// connection id when `multi`. Two that join at once from a `single`
+    /// peer leave the later one.
+    pub fn join(&self, link: &Arc<LiveLink>, replacing: Option<Connections>) -> Join {
+        let replaced: Vec<_> = {
+            let mut links = self.links.lock().unwrap();
+            let roster = self.roster.borrow();
+            let Some(roster) = roster.as_ref().filter(|_| !links.ended) else { return Join::Unavailable };
+            let named = match roster.get(&link.device_id) {
+                None => link.role == Role::Dialer && !roster.settled,
+                Some(peer) => same_key(&peer.public_key, &link.peer_key),
+            };
+            if !named {
+                return Join::Refused;
             }
+            links.all.retain(|other| !other.is_ended());
+            let replaced = match replacing {
+                None => Vec::new(),
+                Some(connections) => links
+                    .all
+                    .iter()
+                    .filter(|other| {
+                        other.role == Role::Listener
+                            && other.device_id == link.device_id
+                            && (connections == Connections::Single || other.connection_id == link.connection_id)
+                    })
+                    .cloned()
+                    .collect(),
+            };
+            links.all.push(link.clone());
+            replaced
+        };
+        for other in replaced {
+            other.end(CLOSE_GOING_AWAY, LinkCloseCause::Replaced);
         }
+        Join::Joined
     }
 
     /// A live roster ends the links of a peer that left it, once settled,
@@ -645,6 +654,32 @@ mod tests {
         attempt.hear(&presence);
         assert!(hub.shared.roster().is_none());
         assert!(hub.live.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn two_links_that_join_at_once_from_a_single_peer_leave_one() {
+        let device = fakes::device().await;
+        let (inner, shared) = (device.inner().clone(), Shared::new());
+        let attempt = FakeAttempt::new(&inner, shared.clone()).await;
+        let (peer, key) = (fakes::ids().0, KeyPair::generate().public_key);
+        attempt.hear(&fakes::presence(&[(&peer, key)]));
+        for _ in 0..10_000 {
+            let (first, _far) = fakes::listened(&inner, &peer, &fakes::ids().1, key).await;
+            let (second, _far) = fakes::listened(&inner, &peer, &fakes::ids().1, key).await;
+            let together = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                for link in [&first, &second] {
+                    let (shared, together) = (&shared, &together);
+                    scope.spawn(move || {
+                        together.wait();
+                        assert_eq!(shared.join(link, Some(Connections::Single)), Join::Joined);
+                    });
+                }
+            });
+            assert!(!first.is_ended() || !second.is_ended());
+            first.end(CLOSE_GOING_AWAY, LinkCloseCause::Stopped);
+            second.end(CLOSE_GOING_AWAY, LinkCloseCause::Stopped);
+        }
     }
 
     fn after(uptime: u64, wait_at_least: u64) -> Run {

@@ -472,7 +472,7 @@ impl Listener {
             greeting: hello.app_hello,
         });
         // The roster may have moved on, or gone, while the app decided.
-        match self.shared.join(&link) {
+        match self.shared.join(&link, Some(connections)) {
             Join::Unavailable => {
                 self.state.lock().unwrap().tickets.unspend(&ticket);
                 conn.close(CLOSE_TRY_AGAIN, "roster unavailable");
@@ -485,7 +485,6 @@ impl Listener {
             }
             Join::Joined => {}
         }
-        self.shared.replace(&link, connections);
         link.send_message(&TransportMessage::Welcome(Welcome { app_welcome }));
         link.run(&self.inner);
         self.state.lock().unwrap().guesses.remove(&arrival.address);
