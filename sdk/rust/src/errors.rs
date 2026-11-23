@@ -17,8 +17,6 @@ pub enum InvalidInput {
     DeviceId,
     /// An app hello is at most 16 KiB.
     AppHello,
-    /// An app message is at most 32 MiB.
-    Message,
 }
 
 impl fmt::Display for InvalidInput {
@@ -28,7 +26,6 @@ impl fmt::Display for InvalidInput {
             InvalidInput::Data => "Device data is a JSON object of at most 1024 bytes.",
             InvalidInput::DeviceId => "A device id is a UUID in lowercase canonical form.",
             InvalidInput::AppHello => "An app hello is at most 16 KiB.",
-            InvalidInput::Message => "An app message is at most 32 MiB.",
         })
     }
 }
@@ -63,8 +60,6 @@ pub enum Error {
     },
     /// The listener could not start.
     Listen(String),
-    /// The device was closed.
-    Closed,
 }
 
 impl Error {
@@ -94,7 +89,6 @@ impl fmt::Display for Error {
                 write!(f, "Could not {operation} the device's credential: {message}")
             }
             Error::Listen(cause) => write!(f, "The listener could not start: {cause}"),
-            Error::Closed => f.write_str("The device was closed."),
         }
     }
 }

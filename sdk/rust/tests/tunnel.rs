@@ -5,7 +5,6 @@
 
 mod common;
 
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
@@ -75,10 +74,6 @@ impl Hooks for Desk {
 
     fn opened(&self, socket: Opened) {
         self.net.opened(socket)
-    }
-
-    fn addresses(&self, found: Vec<IpAddr>) -> Vec<IpAddr> {
-        self.net.addresses(found)
     }
 
     fn cloudflared_on_path(&self) -> String {

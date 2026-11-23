@@ -509,8 +509,7 @@ impl Listener {
     fn offer(&self, from: &str, input: &ConnectInfoInput) -> ConnectInfoResult {
         let mut candidates: Vec<(CandidateKind, String)> = Vec::new();
         if input.dialable_kinds.contains(&CandidateKind::Lan) {
-            let found = self.inner.options.hooks.addresses(interface_addresses());
-            for address in lan_addresses(&found) {
+            for address in lan_addresses(&interface_addresses()) {
                 candidates.push((CandidateKind::Lan, format!("ws://{address}:{}", self.reached_at)));
             }
         }

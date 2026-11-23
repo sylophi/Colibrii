@@ -162,8 +162,7 @@ async fn start_of(pid: u32) -> String {
 }
 
 /// The pid file: the pid, and when that process started.
-#[doc(hidden)]
-pub async fn pid_record(pid: u32) -> String {
+async fn pid_record(pid: u32) -> String {
     format!("{pid}\n{}\n", start_of(pid).await)
 }
 

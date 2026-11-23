@@ -5,7 +5,7 @@
 
 use std::future::Future;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -125,7 +125,6 @@ pub struct Net {
     pub tried: Mutex<Vec<String>>,
     pub opened: Mutex<Vec<Opened>>,
     pub dialable: Mutex<Vec<CandidateKind>>,
-    pub addresses: Mutex<Option<Vec<IpAddr>>>,
     pub ports: Mutex<Vec<u16>>,
 }
 
@@ -172,10 +171,6 @@ impl Hooks for Net {
         self.dialable.lock().unwrap().clone()
     }
 
-    fn addresses(&self, found: Vec<IpAddr>) -> Vec<IpAddr> {
-        self.addresses.lock().unwrap().clone().unwrap_or(found)
-    }
-
     fn bound(&self, port: u16) {
         self.ports.lock().unwrap().push(port);
     }
@@ -196,7 +191,6 @@ impl Kit {
                 tried: Mutex::new(Vec::new()),
                 opened: Mutex::new(Vec::new()),
                 dialable: Mutex::new(vec![CandidateKind::Lan, CandidateKind::Tunnel]),
-                addresses: Mutex::new(None),
                 ports: Mutex::new(Vec::new()),
             }),
         }

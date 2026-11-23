@@ -264,7 +264,6 @@ fn stop_of(code: u16) -> Option<Stop> {
 }
 
 fn connect_url(hub: &str, ticket: &str) -> String {
-    let hub = hub.trim_end_matches('/');
     let hub = hub.strip_prefix("http").map_or_else(|| hub.to_owned(), |rest| format!("ws{rest}"));
     format!("{hub}/connect?ticket={}", percent_encode(ticket))
 }

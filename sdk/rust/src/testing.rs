@@ -1,6 +1,5 @@
 //! What the SDK's own tests put in place of the network. Not for apps.
 
-use std::net::IpAddr;
 use std::sync::Arc;
 
 pub use crate::conn::{Close, Msg, Opened};
@@ -29,11 +28,6 @@ pub trait Hooks: Send + Sync + 'static {
 
     fn dialable_kinds(&self) -> Vec<CandidateKind> {
         vec![CandidateKind::Lan, CandidateKind::Tunnel]
-    }
-
-    /// The listener's addresses, as found.
-    fn addresses(&self, found: Vec<IpAddr>) -> Vec<IpAddr> {
-        found
     }
 
     /// The port the listener bound.
