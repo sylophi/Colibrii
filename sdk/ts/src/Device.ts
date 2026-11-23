@@ -467,24 +467,36 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
     });
 
   // The device stops, if `credential` is still the one it holds.
-  const settle = (credential: string, stop: HubSocket.Stop) =>
+  const settle = (
+    credential: string,
+    stop: HubSocket.Stop,
+  ): Effect.Effect<void> =>
     locked(
       Effect.gen(function* () {
         const current = enrollment;
         if (current === null || current.credential !== credential) return;
         yield* end;
+        // Another run sharing the store may have acted since. One that
+        // enrolled again is run.
+        const stored = yield* Effect.option(readStored);
+        const now = Stored.enrollmentOf(Option.getOrNull(stored));
+        if (now !== null && now.credential !== credential) {
+          enrollment = now;
+          return yield* Effect.ignore(start(now));
+        }
         if (stop === "removed") {
           enrollment = null;
-          // Unless another run sharing the store enrolled since.
-          yield* readStored.pipe(
-            Effect.flatMap((stored) =>
-              Stored.enrollmentOf(stored)?.credential === credential
-                ? Stored.write({ deviceId: current.deviceId, removed: true })
-                : Effect.void,
-            ),
-            Effect.ignore,
-          );
-          yield* SubscriptionRef.set(account, REMOVED);
+          if (now !== null) {
+            yield* Effect.ignore(
+              Stored.write({ deviceId: current.deviceId, removed: true }),
+            );
+          }
+          // One that signed out left nothing to mark.
+          const signedOut =
+            Option.isSome(stored) &&
+            now === null &&
+            !Stored.isRemoved(stored.value);
+          yield* SubscriptionRef.set(account, signedOut ? SIGNED_OUT : REMOVED);
         } else {
           yield* SubscriptionRef.set(account, {
             _tag: "Stopped",
@@ -622,8 +634,10 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
             // A removal still owed keeps its device id, so enrolling
             // replaces the credential it was for, or meets
             // DeviceEnrolledElsewhere and delivers it. Once the service
-            // heard of the removal, a made-up id is made up again.
+            // heard of the removal, a made-up id is made up again. A
+            // device the service removed keeps its id.
             const fresh = options.deviceId ?? crypto.randomUUID();
+            const removedId = Stored.isRemoved(stored) ? stored.deviceId : null;
             const key = generateKeyPair();
             const enrollAs = (deviceId: string) =>
               call(input.loginToken, (client) =>
@@ -641,7 +655,9 @@ const makeDevice = Effect.fnUntraced(function* (options: DeviceOptions) {
             // The device id is still enrolled under the account it
             // signed out of, until the service hears of it.
             const enrolled = yield* enrollAs(
-              owing ? owed.deviceId : (previous?.deviceId ?? fresh),
+              owing
+                ? owed.deviceId
+                : (previous?.deviceId ?? removedId ?? fresh),
             ).pipe(
               Effect.catchTag("DeviceEnrolledElsewhere", (error) =>
                 Effect.gen(function* () {

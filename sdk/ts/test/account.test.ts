@@ -85,7 +85,7 @@ describe("enrolling", () => {
         yield* stale.signOut;
         expect(
           yield* waitFor(fresh.account, (state) => state._tag === "SignedOut"),
-        ).toEqual({ _tag: "SignedOut", removed: true });
+        ).toEqual({ _tag: "SignedOut", removed: false });
         expect(Option.isNone(yield* store.read)).toBe(true);
       }),
     ));
@@ -439,8 +439,10 @@ describe("a removal", () => {
       Effect.gen(function* () {
         const store = memoryStore();
         const account = yield* removedIn(store);
+        const removed = JSON.parse(Option.getOrThrow(yield* store.read));
         const phone = yield* device({ store });
         const enrolled = yield* enroll(phone, account);
+        expect(deviceIdOf(enrolled)).toBe(removed.deviceId);
         const later = yield* device({ store });
         expect(
           yield* waitFor(
@@ -466,7 +468,7 @@ describe("a removal", () => {
       }),
     ));
 
-  it("leaves alone a store that another run enrolled since", () =>
+  it("runs the enrollment another run made since", () =>
     run(
       Effect.gen(function* () {
         // Two tabs of one browser profile, which never hear of each
@@ -493,12 +495,49 @@ describe("a removal", () => {
         yield* desk.devices.remove(phoneId);
         yield* waitFor(quick.account, (state) => state._tag === "SignedOut");
         const enrolled = yield* enroll(quick, account);
-        // The old credential, which the service revoked.
+        // The old credential, which the service no longer takes.
         yield* Effect.flip(slow.devices.list);
-        expect(yield* waitFor(slow.account, () => true)).toEqual(REMOVED);
+        expect(
+          yield* waitFor(
+            slow.account,
+            (state) => state._tag === "Enrolled" && state.connected,
+          ),
+        ).toMatchObject({ deviceId: deviceIdOf(enrolled) });
         expect(JSON.parse(Option.getOrThrow(yield* store.read))).toMatchObject({
           deviceId: deviceIdOf(enrolled),
         });
+      }),
+    ));
+
+  it("reads as signed out where another run signed out since", () =>
+    run(
+      Effect.gen(function* () {
+        const lock = Semaphore.makeUnsafe(1);
+        const store = {
+          ...memoryStore(),
+          shared: { changes: Stream.never, exclusive: lock.withPermits(1) },
+        };
+        const account = newAccountId();
+        const slow = yield* device({ store, connections: "multi" });
+        yield* enroll(slow, account);
+        const slowSocket = spy.opened.findLast((entry) =>
+          entry.url.includes("/connect?"),
+        );
+        if (slowSocket !== undefined) slowSocket.deaf = true;
+        const quick = yield* device({ store, connections: "multi" });
+        yield* waitFor(
+          quick.account,
+          (state) => state._tag === "Enrolled" && state.connected,
+        );
+        expect(yield* quick.signOut).toBe(true);
+        expect((yield* Effect.flip(slow.devices.list))._tag).toBe(
+          "DeviceRevoked",
+        );
+        expect(yield* waitFor(slow.account, () => true)).toEqual({
+          _tag: "SignedOut",
+          removed: false,
+        });
+        expect(Option.isNone(yield* store.read)).toBe(true);
       }),
     ));
 });
