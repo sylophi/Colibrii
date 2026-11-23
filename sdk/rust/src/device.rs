@@ -2,6 +2,7 @@
 //! while enrolled, follows its peers, dials them, and, when it listens, is
 //! dialed by them.
 
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +16,7 @@ use crate::Link;
 use crate::errors::{DialError, Error, InvalidInput, StoreOperation};
 use crate::hub_api::{self, HubApi};
 use crate::listener::{IncomingHello, Listen};
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, Task, spawn_until};
 use crate::session::Session;
 use crate::store::{CredentialStore, Enrollment, Owed, Stored};
 use crate::testing::{self, Hooks};
@@ -45,9 +46,7 @@ pub enum StopReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stop {
     Removed,
-    Superseded,
-    CredentialRejected,
-    UpdateRequired,
+    Stopped(StopReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,9 +271,8 @@ impl Device {
         if let Some(data) = &data {
             valid(is_device_data(data), InvalidInput::Data)?;
         }
-        let inner = self.inner.clone();
         let (login_token, name) = (login_token.to_owned(), name.to_owned());
-        self.runtime.run(async move { inner.enroll(login_token, name, data).await }).await
+        self.run(|inner| async move { inner.enroll(login_token, name, data).await }).await
     }
 
     /// Forgets the credential and reads as signed out at once, then removes
@@ -283,8 +281,7 @@ impl Device {
     /// made, on a wake, before an enrollment, and on the next sign-out.
     /// True once the service let the device go and nothing is owed.
     pub async fn sign_out(&self) -> Result<bool, Error> {
-        let inner = self.inner.clone();
-        self.runtime.run(async move { inner.sign_out().await }).await
+        self.run(|inner| async move { inner.sign_out().await }).await
     }
 
     /// Dials a peer: the link, once its app welcomed the app hello, of at
@@ -326,10 +323,18 @@ impl Device {
 
     /// Closes the hub socket, the listener, every link and the tunnel, and
     /// waits until they are.
+    /// Runs `work` on the device's runtime.
+    fn run<F>(&self, work: impl FnOnce(Arc<Inner>) -> F) -> Task<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.runtime.run(work(self.inner.clone()))
+    }
+
     pub async fn close(mut self) {
         self.closed = true;
-        let inner = self.inner.clone();
-        self.runtime.run(async move { inner.shut_down().await }).await;
+        self.run(Inner::shut_down).await;
         self.runtime.stop();
     }
 }
@@ -370,10 +375,8 @@ pub struct Devices<'a> {
 impl Devices<'_> {
     /// Every device of the app and account, oldest first.
     pub async fn list(&self) -> Result<Vec<DeviceRecord>, Error> {
-        let inner = self.device.inner.clone();
         self.device
-            .runtime
-            .run(async move {
+            .run(|inner| async move {
                 let answer =
                     inner.with_credential(Method::GET, "/devices".into(), None::<&()>, hub_api::DEVICE).await?;
                 DeviceList::decode(&answer)
@@ -396,11 +399,9 @@ impl Devices<'_> {
 
     async fn update(&self, device_id: &str, patch: DevicePatch) -> Result<(), Error> {
         valid(is_device_id(device_id), InvalidInput::DeviceId)?;
-        let inner = self.device.inner.clone();
         let path = format!("/devices/{device_id}");
         self.device
-            .runtime
-            .run(async move {
+            .run(|inner| async move {
                 inner.with_credential(Method::PATCH, path, Some(&patch), hub_api::DEVICE_BY_ID).await.map(|_| ())
             })
             .await
@@ -409,11 +410,9 @@ impl Devices<'_> {
     /// Removes a device. Removing this one reads as removed.
     pub async fn remove(&self, device_id: &str) -> Result<(), Error> {
         valid(is_device_id(device_id), InvalidInput::DeviceId)?;
-        let inner = self.device.inner.clone();
         let device_id = device_id.to_owned();
         self.device
-            .runtime
-            .run(async move {
+            .run(|inner| async move {
                 let this = inner.state.lock().unwrap().enrollment.clone();
                 let path = format!("/devices/{device_id}");
                 inner.with_credential(Method::DELETE, path, None::<&()>, hub_api::DEVICE_BY_ID).await?;
@@ -434,27 +433,19 @@ impl Inner {
             self.account.send_replace(REMOVED);
         }
         if let Some(loaded) = first.as_ref().and_then(Stored::enrollment).cloned() {
-            self.state.lock().unwrap().enrollment = Some(loaded.clone());
             self.start(loaded).await?;
         }
         // A removal still owed goes now, and on every wake.
-        let inner = self.clone();
-        self.tasks.spawn(async move {
-            let mut wakes = inner.wakes.subscribe();
-            let delivering = async {
-                loop {
-                    inner.deliver_owed().await;
-                    if wakes.changed().await.is_err() {
-                        return;
-                    }
+        let (inner, mut wakes) = (self.clone(), self.wakes.subscribe());
+        spawn_until(&self.tasks, &self.closing, async move {
+            loop {
+                inner.deliver_owed().await;
+                if wakes.changed().await.is_err() {
+                    return;
                 }
-            };
-            tokio::select! {
-                _ = inner.closing.cancelled() => {}
-                _ = delivering => {}
             }
         });
-        self.tasks.spawn(crate::wakes::watch_clocks(self.clone()));
+        spawn_until(&self.tasks, &self.closing, crate::wakes::watch_clocks(self.clone()));
         Ok(())
     }
 
@@ -517,9 +508,11 @@ impl Inner {
         }
     }
 
-    /// Boxed, as a session that stops settles, which may start another.
+    /// Runs `stored`, which the device now holds. Boxed, as a session that
+    /// stops settles, which may start another.
     fn start(self: &Arc<Self>, stored: Enrollment) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
         Box::pin(async move {
+            self.state.lock().unwrap().enrollment = Some(stored.clone());
             self.end().await;
             self.account.send_replace(AccountState::Enrolled {
                 device_id: stored.device_id.clone(),
@@ -549,7 +542,6 @@ impl Inner {
         let stored = self.read_stored().await;
         let now = stored.as_ref().ok().and_then(Option::as_ref).and_then(Stored::enrollment).cloned();
         if let Some(now) = now.as_ref().filter(|now| now.credential != credential) {
-            self.state.lock().unwrap().enrollment = Some(now.clone());
             let _ = self.start(now.clone()).await;
             return;
         }
@@ -564,9 +556,7 @@ impl Inner {
                 self.account.send_replace(if signed_out { SIGNED_OUT } else { REMOVED });
                 return;
             }
-            Stop::Superseded => StopReason::Superseded,
-            Stop::CredentialRejected => StopReason::CredentialRejected,
-            Stop::UpdateRequired => StopReason::UpdateRequired,
+            Stop::Stopped(reason) => reason,
         };
         self.account.send_replace(AccountState::Stopped {
             device_id: current.device_id,
@@ -575,11 +565,16 @@ impl Inner {
         });
     }
 
+    /// Settles apart from the caller, such as a session that settling ends.
+    pub fn settle_apart(self: &Arc<Self>, credential: String, stop: Stop) {
+        let inner = self.clone();
+        self.tasks.spawn(async move { inner.settle(&credential, stop).await });
+    }
+
     /// Settles a call's error that stops the device, apart from the call.
     pub fn settle_on(self: &Arc<Self>, credential: &str, error: &Error) {
         if let Some(stop) = hub_api::stop_of_error(error) {
-            let (inner, credential) = (self.clone(), credential.to_owned());
-            self.tasks.spawn(async move { inner.settle(&credential, stop).await });
+            self.settle_apart(credential.to_owned(), stop);
         }
     }
 
@@ -650,7 +645,6 @@ impl Inner {
             let running =
                 self.state.lock().unwrap().enrollment.as_ref().map(|enrollment| enrollment.credential.clone());
             if running.as_ref() != Some(&previous.credential) {
-                self.state.lock().unwrap().enrollment = Some(previous.clone());
                 self.start(previous.clone()).await?;
             }
             return Ok(());
@@ -687,7 +681,6 @@ impl Inner {
             port: previous.and_then(|previous| previous.port),
         };
         self.write_stored(Stored::Enrollment(next.clone())).await?;
-        self.state.lock().unwrap().enrollment = Some(next.clone());
         self.start(next).await
     }
 

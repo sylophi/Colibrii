@@ -126,11 +126,11 @@ impl HubApi {
 
 /// A call's error that stops the device as its close code would.
 pub(crate) fn stop_of_error(error: &Error) -> Option<crate::device::Stop> {
-    use crate::device::Stop;
+    use crate::device::{Stop, StopReason};
     match error {
         Error::Service(ServiceError::DeviceRevoked) => Some(Stop::Removed),
-        Error::Service(ServiceError::CredentialRejected) => Some(Stop::CredentialRejected),
-        Error::Service(ServiceError::UpdateRequired { .. }) => Some(Stop::UpdateRequired),
+        Error::Service(ServiceError::CredentialRejected) => Some(Stop::Stopped(StopReason::CredentialRejected)),
+        Error::Service(ServiceError::UpdateRequired { .. }) => Some(Stop::Stopped(StopReason::UpdateRequired)),
         _ => None,
     }
 }

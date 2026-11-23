@@ -16,11 +16,12 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::conn::{self, Conn, Msg};
-use crate::device::{Inner, Peer, Stop};
+use crate::device::{Inner, Peer, Stop, StopReason};
 use crate::errors::{DialError, Error};
 use crate::hub_api::{self, stop_of_error};
 use crate::link::{LinkCloseCause, LiveLink, Role};
 use crate::liveness::{self, Heard};
+use crate::runtime::spawn_until;
 use crate::wire::api::{TicketRequest, TicketResponse};
 use crate::wire::hub::{CLOSE_DEVICE_REMOVED, CLOSE_SUPERSEDED, Connections, PING, PONG, ServiceMessage, encode_relay};
 use crate::wire::link::CLOSE_GOING_AWAY;
@@ -258,7 +259,7 @@ fn failed(wait_at_least: Duration) -> Result<Run, Stop> {
 fn stop_of(code: u16) -> Option<Stop> {
     match code {
         CLOSE_DEVICE_REMOVED => Some(Stop::Removed),
-        CLOSE_SUPERSEDED => Some(Stop::Superseded),
+        CLOSE_SUPERSEDED => Some(Stop::Stopped(StopReason::Superseded)),
         _ => None,
     }
 }
@@ -292,21 +293,6 @@ fn roster_of(online: &[crate::wire::hub::OnlineDevice], me: &str) -> Vec<Peer> {
             })
         })
         .collect()
-}
-
-/// Runs `work` until `token` is cancelled.
-pub(crate) fn spawn_until(
-    tasks: &TaskTracker,
-    token: &CancellationToken,
-    work: impl Future<Output = ()> + Send + 'static,
-) {
-    let token = token.clone();
-    tasks.spawn(async move {
-        tokio::select! {
-            _ = token.cancelled() => {}
-            _ = work => {}
-        }
-    });
 }
 
 /// What an attempt leaves behind once it ends, however it ends.

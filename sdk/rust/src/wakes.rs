@@ -16,10 +16,7 @@ const SLEPT: Duration = Duration::from_secs(5);
 pub(crate) async fn watch_clocks(inner: Arc<Inner>) {
     let mut last = (SystemTime::now(), Instant::now());
     loop {
-        tokio::select! {
-            _ = inner.closing.cancelled() => return,
-            _ = tokio::time::sleep(CHECK_EVERY) => {}
-        }
+        tokio::time::sleep(CHECK_EVERY).await;
         let now = (SystemTime::now(), Instant::now());
         let wall = now.0.duration_since(last.0).unwrap_or_default();
         if wall.saturating_sub(now.1 - last.1) > SLEPT {

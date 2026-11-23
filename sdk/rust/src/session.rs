@@ -138,14 +138,8 @@ impl Session {
             }
         });
 
-        let credential = stored.credential;
-        let settling = inner.clone();
-        shared.spawn(async move {
-            let stop = hub.run().await;
-            // Apart from this session, which settling ends.
-            let device = settling.clone();
-            settling.tasks.spawn(async move { device.settle(&credential, stop).await });
-        });
+        let (credential, settling) = (stored.credential, inner.clone());
+        shared.spawn(async move { settling.settle_apart(credential, hub.run().await) });
         Ok(session)
     }
 

@@ -11,6 +11,7 @@ use crate::conn::{Conn, Msg};
 use crate::device::Inner;
 use crate::errors::SendError;
 use crate::liveness::{self, Heard};
+use crate::runtime::spawn_until;
 use crate::wire::link::{
     AppMessageJoiner, CLOSE_GOING_AWAY, CLOSE_NORMAL, CLOSE_PROTOCOL_ERROR, CLOSE_TOO_BIG, Joined,
     MAX_APP_MESSAGE_BYTES, TransportMessage, open_transport_message, seal_transport_message, split_app_message,
@@ -117,30 +118,16 @@ impl LiveLink {
 
     /// Its reader and its liveness, until it ends.
     pub fn run(self: &Arc<Self>, inner: &Arc<Inner>) {
-        let link = self;
         let heard = Arc::new(Heard::new());
-        let (reading, heard_by_reader) = (link.clone(), heard.clone());
-        let stop = link.stop.clone();
-        inner.tasks.spawn(async move {
-            tokio::select! {
-                _ = stop.cancelled() => {}
-                _ = reading.read(&heard_by_reader) => {}
+        let (reading, heard_by_reader) = (self.clone(), heard.clone());
+        spawn_until(&inner.tasks, &self.stop, async move { reading.read(&heard_by_reader).await });
+        let (watching, wakes) = (self.clone(), inner.wakes.subscribe());
+        spawn_until(&inner.tasks, &self.stop, async move {
+            match watching.role {
+                Role::Dialer => liveness::watch(|| watching.send_message(&TransportMessage::Ping), &heard, wakes).await,
+                Role::Listener => liveness::silence(&heard).await,
             }
-        });
-        let (watching, wakes, stop) = (link.clone(), inner.wakes.subscribe(), link.stop.clone());
-        inner.tasks.spawn(async move {
-            let quiet = async {
-                match watching.role {
-                    Role::Dialer => {
-                        liveness::watch(|| watching.send_message(&TransportMessage::Ping), &heard, wakes).await
-                    }
-                    Role::Listener => liveness::silence(&heard).await,
-                }
-            };
-            tokio::select! {
-                _ = stop.cancelled() => {}
-                _ = quiet => watching.end(CLOSE_GOING_AWAY, LinkCloseCause::Silent),
-            }
+            watching.end(CLOSE_GOING_AWAY, LinkCloseCause::Silent);
         });
     }
 

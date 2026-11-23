@@ -11,6 +11,8 @@ use std::thread;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 pub(crate) struct Runtime {
     handle: Handle,
@@ -62,6 +64,21 @@ impl Runtime {
             }
         }
     }
+}
+
+/// Runs `work` until `token` is cancelled.
+pub(crate) fn spawn_until(
+    tasks: &TaskTracker,
+    token: &CancellationToken,
+    work: impl Future<Output = ()> + Send + 'static,
+) {
+    let token = token.clone();
+    tasks.spawn(async move {
+        tokio::select! {
+            _ = token.cancelled() => {}
+            _ = work => {}
+        }
+    });
 }
 
 /// A task on the device's runtime that stops when dropped.
