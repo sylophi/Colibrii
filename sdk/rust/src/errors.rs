@@ -60,6 +60,8 @@ pub enum Error {
     },
     /// The listener could not start.
     Listen(String),
+    /// The device's own runtime could not start.
+    Runtime(String),
 }
 
 impl Error {
@@ -94,6 +96,7 @@ impl fmt::Display for Error {
                 write!(f, "Could not {operation} the device's credential: {message}")
             }
             Error::Listen(cause) => write!(f, "The listener could not start: {cause}"),
+            Error::Runtime(cause) => write!(f, "The device's runtime could not start: {cause}"),
         }
     }
 }

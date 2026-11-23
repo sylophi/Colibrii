@@ -228,7 +228,7 @@ impl Device {
             valid(is_device_id(device_id), InvalidInput::DeviceId)?;
         }
         let runtime =
-            Arc::new(Runtime::new(options.runtime.clone()).map_err(|error| Error::Listen(error.to_string()))?);
+            Arc::new(Runtime::new(options.runtime.clone()).map_err(|error| Error::Runtime(error.to_string()))?);
         let inner = Arc::new(Inner {
             api: HubApi::new(&options.hub, options.hooks.clone()),
             options,
