@@ -16,24 +16,29 @@ use tokio_util::task::TaskTracker;
 
 pub(crate) struct Runtime {
     handle: Handle,
-    // The device's own thread, ended once the device closed.
-    owned: Mutex<Option<(oneshot::Sender<()>, thread::JoinHandle<()>)>>,
+    // The device's own thread: what stops it, and what says it ended.
+    owned: Mutex<Option<oneshot::Sender<()>>>,
+    exited: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
 impl Runtime {
     pub fn new(given: Option<Handle>) -> std::io::Result<Runtime> {
         if let Some(handle) = given {
-            return Ok(Runtime { handle, owned: Mutex::new(None) });
+            return Ok(Runtime { handle, owned: Mutex::new(None), exited: Mutex::new(None) });
         }
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         let handle = runtime.handle().clone();
         let (stop, stopped) = oneshot::channel::<()>();
-        let thread = thread::Builder::new().name("colibrii".into()).spawn(move || {
+        let (exit, exited) = oneshot::channel::<()>();
+        thread::Builder::new().name("colibrii".into()).spawn(move || {
             runtime.block_on(async {
                 let _ = stopped.await;
             });
+            // Once its blocking work, such as a store call, returned too.
+            drop(runtime);
+            let _ = exit.send(());
         })?;
-        Ok(Runtime { handle, owned: Mutex::new(Some((stop, thread))) })
+        Ok(Runtime { handle, owned: Mutex::new(Some(stop)), exited: Mutex::new(Some(exited)) })
     }
 
     /// Runs `future` on the device's runtime, from wherever it is awaited.
@@ -64,14 +69,18 @@ impl Runtime {
         self.handle.spawn(future)
     }
 
-    /// Ends the device's own thread, whose tasks are then dropped. Joins it
-    /// unless called on it.
+    /// Ends the device's own thread, whose tasks are then dropped.
     pub fn stop(&self) {
-        if let Some((stop, thread)) = self.owned.lock().unwrap().take() {
+        if let Some(stop) = self.owned.lock().unwrap().take() {
             let _ = stop.send(());
-            if thread.thread().id() != thread::current().id() {
-                let _ = thread.join();
-            }
+        }
+    }
+
+    /// Until the device's own thread ended, from wherever it is awaited.
+    pub async fn exited(&self) {
+        let exited = self.exited.lock().unwrap().take();
+        if let Some(exited) = exited {
+            let _ = exited.await;
         }
     }
 }

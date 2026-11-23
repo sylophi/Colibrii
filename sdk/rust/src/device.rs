@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use reqwest::Method;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -343,21 +344,25 @@ impl Device {
     /// waits until they are.
     pub async fn close(mut self) {
         self.closed = true;
-        self.runtime.run(self.inner.clone().shut_down()).await;
-        self.runtime.stop();
+        let _ = self.shut_down().await;
+        self.runtime.exited().await;
+    }
+
+    /// Shuts the device down on its runtime, whether or not anything waits.
+    fn shut_down(&self) -> JoinHandle<()> {
+        let (inner, runtime) = (self.inner.clone(), self.runtime.clone());
+        self.runtime.spawn(async move {
+            inner.shut_down().await;
+            runtime.stop();
+        })
     }
 }
 
 impl Drop for Device {
     fn drop(&mut self) {
-        if self.closed {
-            return;
+        if !self.closed {
+            drop(self.shut_down());
         }
-        let (inner, runtime) = (self.inner.clone(), self.runtime.clone());
-        self.runtime.spawn(async move {
-            inner.shut_down().await;
-            runtime.stop();
-        });
     }
 }
 
@@ -765,15 +770,21 @@ mod tests {
     use super::*;
     use crate::store::MemoryStore;
 
-    /// A store whose next write waits for the test once it is handed a gate.
+    /// A store whose next read or write waits for the test once it is
+    /// handed a gate.
     #[derive(Default)]
     struct Gated {
         held: MemoryStore,
         gate: Mutex<Option<std_mpsc::Receiver<()>>>,
+        read_gate: Mutex<Option<std_mpsc::Receiver<()>>>,
     }
 
     impl CredentialStore for Gated {
         fn read(&self) -> io::Result<Option<String>> {
+            let gate = self.read_gate.lock().unwrap().take();
+            if let Some(gate) = gate {
+                let _ = gate.recv();
+            }
             self.held.read()
         }
 
@@ -810,6 +821,77 @@ mod tests {
         device.inner.state.lock().unwrap().session.is_some()
     }
 
+    async fn until(mut done: impl FnMut() -> bool) -> bool {
+        timeout(Duration::from_secs(5), async {
+            while !done() {
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .is_ok()
+    }
+
+    /// A store that holds an enrollment and fails every write.
+    struct Unwritable(MemoryStore);
+
+    impl CredentialStore for Unwritable {
+        fn read(&self) -> io::Result<Option<String>> {
+            self.0.read()
+        }
+
+        fn write(&self, _text: &str) -> io::Result<()> {
+            Err(io::Error::other("full"))
+        }
+
+        fn remove(&self) -> io::Result<()> {
+            self.0.remove()
+        }
+    }
+
+    #[derive(Default)]
+    struct Bound(Mutex<Option<u16>>);
+
+    impl Hooks for Bound {
+        fn bound(&self, port: u16) {
+            *self.0.lock().unwrap() = Some(port);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_session_whose_port_was_not_saved_stops_listening() {
+        let (held, bound) = (MemoryStore::new(), Arc::new(Bound::default()));
+        let enrollment = Enrollment {
+            device_id: new_device_id(),
+            account_id: "account".into(),
+            credential: "credential".into(),
+            private_key: KeyPair::generate().private_key,
+            port: None,
+        };
+        held.write(&Stored::Enrollment(enrollment).encode()).unwrap();
+        let options = Options::new("http://127.0.0.1:1", "inkwell", Connections::Single, Arc::new(Unwritable(held)))
+            .listen(Listen::new())
+            .hooks(bound.clone())
+            .runtime(tokio::runtime::Handle::current());
+        assert!(matches!(Device::new(options).await, Err(Error::Store { .. })));
+        let port = bound.0.lock().unwrap().unwrap();
+        let refused = async {
+            while tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                sleep(Duration::from_millis(5)).await;
+            }
+        };
+        assert!(timeout(Duration::from_secs(5), refused).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_close_dropped_while_it_waits_still_closes() {
+        let (device, _) = enrolled(Arc::new(MemoryStore::new())).await;
+        let inner = device.inner.clone();
+        let held = inner.lifecycle.lock().await;
+        assert!(timeout(Duration::from_millis(20), device.close()).await.is_err());
+        drop(held);
+        assert!(until(|| inner.state.lock().unwrap().session.is_none()).await);
+    }
+
     #[tokio::test]
     async fn a_sign_out_dropped_while_its_store_write_runs_still_signs_out() {
         let store = Arc::new(Gated::default());
@@ -841,5 +923,30 @@ mod tests {
         device.sign_out().await.unwrap();
         assert_eq!(device.account().get(), SIGNED_OUT);
         assert!(!running(&device));
+    }
+
+    #[test]
+    fn a_close_leaves_its_caller_free_while_the_device_thread_ends() {
+        let (done, finished) = std_mpsc::channel();
+        std::thread::spawn(move || {
+            let caller = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            caller.block_on(async {
+                let store = Arc::new(Gated::default());
+                let options = Options::new("http://127.0.0.1:1", "inkwell", Connections::Single, store.clone());
+                let device = Device::new(options).await.unwrap();
+                // A store read still running once the device's tasks ended.
+                let (open, gate) = std_mpsc::channel();
+                *store.read_gate.lock().unwrap() = Some(gate);
+                device.wake();
+                assert!(until(|| store.read_gate.lock().unwrap().is_none()).await);
+                let opening = async {
+                    sleep(Duration::from_millis(50)).await;
+                    open.send(()).unwrap();
+                };
+                tokio::join!(device.close(), opening);
+            });
+            let _ = done.send(());
+        });
+        assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());
     }
 }

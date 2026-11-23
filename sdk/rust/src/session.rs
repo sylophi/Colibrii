@@ -60,6 +60,19 @@ fn provision(inner: &Arc<Inner>, credential: &str, port: u16) -> Provision {
     })
 }
 
+/// Ends what a session's start started, unless it got as far as the
+/// session.
+struct Starting(Option<Arc<Shared>>);
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        if let Some(shared) = self.0.take() {
+            shared.end_links();
+            shared.ended.cancel();
+        }
+    }
+}
+
 impl Session {
     pub async fn start(inner: Arc<Inner>, stored: Enrollment) -> Result<Arc<Session>, Error> {
         let identity = Arc::new(Identity {
@@ -68,19 +81,14 @@ impl Session {
             key: KeyPair::from_private_key(stored.private_key),
         });
         let shared = Shared::new();
+        let mut starting = Starting(Some(shared.clone()));
         let listener = match &inner.options.listen {
             None => None,
             Some(listen) => {
                 let started =
                     Listener::start(inner.clone(), identity.clone(), shared.clone(), listen, stored.port.unwrap_or(0))
                         .await;
-                let listener = match started {
-                    Ok(listener) => listener,
-                    Err(error) => {
-                        shared.ended.cancel();
-                        return Err(Error::Listen(error.to_string()));
-                    }
-                };
+                let listener = started.map_err(|error| Error::Listen(error.to_string()))?;
                 if Some(listener.port) != stored.port {
                     let current = inner.state.lock().unwrap().enrollment.clone();
                     if let Some(mut current) = current.filter(|current| current.credential == stored.credential) {
@@ -136,6 +144,7 @@ impl Session {
 
         let (credential, settling) = (stored.credential, inner.clone());
         shared.spawn(async move { settling.settle_apart(credential, hub.run().await) });
+        starting.0 = None;
         Ok(session)
     }
 
