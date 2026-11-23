@@ -64,7 +64,7 @@ pub struct DeviceRecord {
 
 impl DeviceRecord {
     pub fn decode(value: &Value) -> Option<DeviceRecord> {
-        let record: DeviceRecord = serde_json::from_value(value.clone()).ok()?;
+        let record = DeviceRecord::deserialize(value).ok()?;
         (is_device_id(&record.device_id) && is_device_name(&record.name) && is_device_data(&record.data))
             .then_some(record)
     }
@@ -86,7 +86,7 @@ pub struct OnlineDevice {
 
 impl OnlineDevice {
     pub fn decode(value: &Value) -> Option<OnlineDevice> {
-        let device: OnlineDevice = serde_json::from_value(value.clone()).ok()?;
+        let device = OnlineDevice::deserialize(value).ok()?;
         (is_device_id(&device.device_id) && is_public_key(&device.public_key)).then_some(device)
     }
 }

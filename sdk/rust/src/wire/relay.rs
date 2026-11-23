@@ -4,9 +4,9 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use super::base64url;
 use super::ids::is_connection_id;
 use super::noise::{HandshakeState, KeyPair, NoiseError};
+use super::{base64url, decode_json};
 
 pub const ASK_TIMEOUT_MS: u64 = 10_000;
 /// How long the asked device remembers an ask it opened.
@@ -299,7 +299,7 @@ pub fn open_ask(asker: &str, asked: &str, key: &KeyPair, sealed: &str, e: Option
     let mut handshake = HandshakeState::responder(&relay_prologue(asker, asked), key.clone(), e);
     let (payload, _) = handshake.read_message(&message).ok()?;
     let asker_key = handshake.remote_static_key()?;
-    let ask = Ask::decode(&serde_json::from_str(&String::from_utf8_lossy(&payload)).ok()?)?;
+    let ask = Ask::decode(&decode_json(&payload)?)?;
     Some(OpenedAsk { ask, asker_key, handshake_hash: handshake.handshake_hash(), handshake })
 }
 
@@ -310,5 +310,5 @@ pub fn seal_answer(handshake: &mut HandshakeState, payload: &[u8]) -> Result<Str
 pub fn open_answer(handshake: &mut HandshakeState, sealed: &str) -> Option<Answer> {
     let message = base64url::decode(sealed)?;
     let (payload, _) = handshake.read_message(&message).ok()?;
-    Answer::decode(&serde_json::from_str(&String::from_utf8_lossy(&payload)).ok()?)
+    Answer::decode(&decode_json(&payload)?)
 }

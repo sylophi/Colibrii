@@ -24,6 +24,11 @@ pub fn same_key(a: &[u8; 32], b: &[u8; 32]) -> bool {
     a == b
 }
 
+/// JSON inside a Noise message, as UTF-8.
+fn decode_json(body: &[u8]) -> Option<serde_json::Value> {
+    serde_json::from_str(&String::from_utf8_lossy(body)).ok()
+}
+
 /// A device key's public half as the service and the roster carry it.
 pub fn decode_public_key(text: &str) -> Option<[u8; 32]> {
     base64url::decode(text)?.try_into().ok()

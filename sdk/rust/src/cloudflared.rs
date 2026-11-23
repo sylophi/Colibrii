@@ -70,7 +70,7 @@ fn field(header: &[u8], start: usize, length: usize) -> String {
 
 /// The file named `name` in a tar archive: each entry is a 512-byte header
 /// and its body padded to 512 bytes, until two empty blocks.
-fn from_tar(tar: &[u8], name: &str) -> Option<Vec<u8>> {
+fn from_tar<'a>(tar: &'a [u8], name: &str) -> Option<&'a [u8]> {
     let mut offset = 0;
     while offset + 512 <= tar.len() {
         let header = &tar[offset..offset + 512];
@@ -81,7 +81,7 @@ fn from_tar(tar: &[u8], name: &str) -> Option<Vec<u8>> {
         let path = field(header, 0, 100);
         let path = path.strip_prefix("./").unwrap_or(&path);
         if path == name && matches!(header[156], b'0' | 0) {
-            return tar.get(offset + 512..offset + 512 + size).map(<[u8]>::to_vec);
+            return tar.get(offset + 512..offset + 512 + size);
         }
         offset += 512 + size.div_ceil(512) * 512;
     }
@@ -103,16 +103,15 @@ async fn fetch(directory: PathBuf) -> Result<PathBuf, FetchError> {
         return Err(FetchError::Download);
     }
     let download = response.bytes().await.map_err(|_| FetchError::Download)?;
-    let digest: String = Sha256::digest(&download).iter().map(|byte| format!("{byte:02x}")).collect();
-    if digest != sha256 {
+    if crate::wire::ids::hex(&Sha256::digest(&download)) != sha256 {
         return Err(FetchError::Checksum);
     }
+    let mut tar = Vec::new();
     let binary = if name.ends_with(".tgz") {
-        let mut tar = Vec::new();
         flate2::read::GzDecoder::new(&download[..]).read_to_end(&mut tar).map_err(|_| FetchError::Unpack)?;
         from_tar(&tar, BINARY).ok_or(FetchError::Unpack)?
     } else {
-        download.to_vec()
+        &download[..]
     };
     let path = pinned_path(&directory);
     // Whole or not at all, so the runner never finds half a binary.
@@ -121,7 +120,7 @@ async fn fetch(directory: PathBuf) -> Result<PathBuf, FetchError> {
     let next = PathBuf::from(next);
     let written = async {
         tokio::fs::create_dir_all(&directory).await?;
-        tokio::fs::write(&next, &binary).await?;
+        tokio::fs::write(&next, binary).await?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -154,7 +153,7 @@ mod tests {
         let mut tar = entry("./README", &[7; 600]);
         tar.extend(entry("./cloudflared", b"the binary"));
         tar.extend([0; 1024]);
-        assert_eq!(from_tar(&tar, "cloudflared").as_deref(), Some(&b"the binary"[..]));
+        assert_eq!(from_tar(&tar, "cloudflared"), Some(&b"the binary"[..]));
         assert_eq!(from_tar(&tar, "other"), None);
     }
 }

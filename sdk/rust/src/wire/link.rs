@@ -4,9 +4,9 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use super::base64url;
 use super::ids::{is_connection_id, is_device_id};
 use super::noise::{HandshakeState, KeyPair, MAX_MESSAGE_BYTES, NoiseError, TAG_BYTES, Transport};
+use super::{base64url, decode_json};
 
 // ---- Tickets ----
 
@@ -231,10 +231,6 @@ pub fn encode_transport_message(message: &TransportMessage) -> Vec<u8> {
         TransportMessage::Ping => vec![TYPE_PING],
         TransportMessage::Pong => vec![TYPE_PONG],
     }
-}
-
-fn decode_json(body: &[u8]) -> Option<Value> {
-    serde_json::from_str(&String::from_utf8_lossy(body)).ok()
 }
 
 fn decode_hello(value: &Value) -> Option<Hello> {
