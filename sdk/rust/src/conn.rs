@@ -162,12 +162,12 @@ async fn drive<S>(
             biased;
             command = out.recv() => {
                 let (code, reason) = match command {
-                    Some(Out::Msg(Msg::Text(text))) => {
-                        if sink.send(Message::text(text)).await.is_err() { break abnormal(&open) }
-                        continue;
-                    }
-                    Some(Out::Msg(Msg::Binary(bytes))) => {
-                        if sink.send(Message::binary(bytes)).await.is_err() { break abnormal(&open) }
+                    Some(Out::Msg(message)) => {
+                        let message = match message {
+                            Msg::Text(text) => Message::text(text),
+                            Msg::Binary(bytes) => Message::binary(bytes),
+                        };
+                        if sink.send(message).await.is_err() { break abnormal(&open) }
                         continue;
                     }
                     Some(Out::Close(code, reason)) => (code, reason),
@@ -223,8 +223,7 @@ fn abnormal(open: &AtomicBool) -> Close {
 /// Why a socket did not open.
 #[derive(Debug, Clone)]
 pub(crate) struct OpenError {
-    /// The HTTP status the upgrade was answered with instead.
-    pub status: Option<u16>,
+    /// How long an upgrade answered 429 asks to wait.
     pub retry_after_seconds: Option<f64>,
     pub cause: String,
 }
@@ -238,7 +237,7 @@ pub(crate) async fn open(
     hooks: &Arc<dyn Hooks>,
     tasks: &TaskTracker,
 ) -> Result<Conn, OpenError> {
-    let refused = |cause: String| OpenError { status: None, retry_after_seconds: None, cause };
+    let refused = |cause: String| OpenError { retry_after_seconds: None, cause };
     if !hooks.open(url) {
         return Err(refused("refused by the test".into()));
     }
@@ -257,13 +256,14 @@ pub(crate) async fn open(
             hooks.opened(Opened::of(url, &conn));
             Ok(conn)
         }
-        Err(WsError::Http(response)) => Err(OpenError {
-            status: Some(response.status().as_u16()),
-            retry_after_seconds: Some(crate::hub_api::retry_after_of(
-                response.headers().get("retry-after").and_then(|value| value.to_str().ok()),
-            )),
-            cause: format!("the upgrade was answered {}", response.status().as_u16()),
-        }),
+        Err(WsError::Http(response)) => {
+            let status = response.status().as_u16();
+            let retry_after = response.headers().get("retry-after").and_then(|value| value.to_str().ok());
+            Err(OpenError {
+                retry_after_seconds: (status == 429).then(|| crate::hub_api::retry_after_of(retry_after)),
+                cause: format!("the upgrade was answered {status}"),
+            })
+        }
         Err(error) => Err(refused(error.to_string())),
     }
 }

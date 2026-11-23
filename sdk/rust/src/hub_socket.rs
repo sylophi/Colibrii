@@ -323,10 +323,8 @@ impl HubSocket {
         })
     }
 
-    /// Keeps the socket up, on the reconnect ladder: 1, 2, 4, 8, then 16
-    /// seconds, staying at 16, and starting over after a run that stayed up
-    /// 30 seconds. A wake cuts a wait on the ladder short, never one the far
-    /// end asked for. Returns why the device stops.
+    /// Keeps the socket up, on the reconnect ladder. Returns why the device
+    /// stops.
     pub async fn run(self: Arc<Self>) -> Stop {
         let mut ladder = Ladder::default();
         loop {
@@ -371,12 +369,7 @@ impl HubSocket {
         .await
         {
             Err(_) => return failed(Duration::ZERO),
-            Ok(Err(error)) => {
-                return match (error.status, error.retry_after_seconds) {
-                    (Some(429), Some(seconds)) => failed(Duration::from_secs_f64(seconds)),
-                    _ => failed(Duration::ZERO),
-                };
-            }
+            Ok(Err(error)) => return failed(error.retry_after_seconds.map_or(Duration::ZERO, Duration::from_secs_f64)),
             Ok(Ok(conn)) => Arc::new(conn),
         };
         let current = Arc::new(Live {
