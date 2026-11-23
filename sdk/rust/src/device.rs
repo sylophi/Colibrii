@@ -516,10 +516,15 @@ impl Inner {
         }
     }
 
-    /// Runs `stored`, which the device now holds. Boxed, as a session that
-    /// stops settles, which may start another.
+    /// Runs `stored`, which the device now holds, unless it is closing.
+    /// Under the lifecycle lock, or before the device is made. Boxed, as a
+    /// session that stops settles, which may start another.
     fn start(self: &Arc<Self>, stored: Enrollment) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
         Box::pin(async move {
+            // Closing ended the session already, and would not end this one.
+            if self.closing.is_cancelled() {
+                return Ok(());
+            }
             self.state.lock().unwrap().enrollment = Some(stored.clone());
             self.end().await;
             self.account.send_replace(AccountState::Enrolled {
@@ -886,6 +891,32 @@ mod tests {
         assert!(timeout(Duration::from_millis(20), device.close()).await.is_err());
         drop(held);
         assert!(until(|| inner.state.lock().unwrap().session.is_none()).await);
+    }
+
+    #[tokio::test]
+    async fn an_enrollment_that_waited_on_a_closing_device_runs_nothing() {
+        use futures_util::FutureExt;
+        let store = Arc::new(MemoryStore::new());
+        let options = Options::new("http://127.0.0.1:1", "inkwell", Connections::Single, store.clone())
+            .runtime(tokio::runtime::Handle::current());
+        let device = Device::new(options).await.unwrap();
+        // Another run sharing the store enrolled, which this enrollment runs.
+        let enrollment = Enrollment {
+            device_id: new_device_id(),
+            account_id: "account".into(),
+            credential: "credential".into(),
+            private_key: KeyPair::generate().private_key,
+            port: None,
+        };
+        store.write(&Stored::Enrollment(enrollment).encode()).unwrap();
+        let held = device.inner.lifecycle.lock().await;
+        let closing = tokio::spawn(device.inner.clone().shut_down());
+        assert!(until(|| device.inner.closing.is_cancelled()).await);
+        assert!(device.enroll("login", "Laptop", None).now_or_never().is_none());
+        tokio::task::yield_now().await;
+        drop(held);
+        closing.await.unwrap();
+        assert!(!running(&device));
     }
 
     #[tokio::test]
