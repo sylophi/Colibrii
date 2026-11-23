@@ -8,6 +8,7 @@ use reqwest::Method;
 use serde_json::{Map, Value};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::errors::{Error, InvalidInput, StoreOperation};
 use crate::hub_api::{self, HubApi};
@@ -170,6 +171,8 @@ pub(crate) struct Inner {
     pub connection_id: String,
     /// Done once the device closes.
     pub closing: CancellationToken,
+    /// Every task of the device's, which closing waits for.
+    pub tasks: TaskTracker,
 }
 
 /// One install of one app: enrolled under the person's account, it keeps
@@ -206,6 +209,7 @@ impl Device {
             state: Mutex::new(State::default()),
             connection_id: new_connection_id(),
             closing: CancellationToken::new(),
+            tasks: TaskTracker::new(),
         });
         let started = runtime.run(inner.clone().start_up()).await;
         let device = Device { inner, runtime, closed: false };
@@ -380,17 +384,22 @@ impl Inner {
         }
         // A removal still owed goes now, and on every wake.
         let inner = self.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn(async move {
             let mut wakes = inner.wakes.subscribe();
-            loop {
-                inner.deliver_owed().await;
-                tokio::select! {
-                    _ = inner.closing.cancelled() => return,
-                    changed = wakes.changed() => if changed.is_err() { return },
+            let delivering = async {
+                loop {
+                    inner.deliver_owed().await;
+                    if wakes.changed().await.is_err() {
+                        return;
+                    }
                 }
+            };
+            tokio::select! {
+                _ = inner.closing.cancelled() => {}
+                _ = delivering => {}
             }
         });
-        tokio::spawn(crate::wakes::watch_clocks(self.clone()));
+        self.tasks.spawn(crate::wakes::watch_clocks(self.clone()));
         Ok(())
     }
 
@@ -403,8 +412,12 @@ impl Inner {
             return;
         }
         self.closing.cancel();
-        let _held = self.lifecycle.lock().await;
+        let held = self.lifecycle.lock().await;
         self.end().await;
+        drop(held);
+        // Until every socket closed as it should.
+        self.tasks.close();
+        self.tasks.wait().await;
     }
 
     // ---- The store ----
@@ -500,7 +513,7 @@ impl Inner {
     pub fn settle_on(self: &Arc<Self>, credential: &str, error: &Error) {
         if let Some(stop) = hub_api::stop_of_error(error) {
             let (inner, credential) = (self.clone(), credential.to_owned());
-            tokio::spawn(async move { inner.settle(&credential, stop).await });
+            self.tasks.spawn(async move { inner.settle(&credential, stop).await });
         }
     }
 

@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_util::task::TaskTracker;
 
 use crate::testing::Hooks;
 use crate::wire::hub::MAX_SERVICE_MESSAGE_BYTES;
@@ -61,7 +62,7 @@ pub(crate) struct Conn {
 }
 
 impl Conn {
-    fn start<S>(ws: WebSocketStream<S>, spy: bool) -> Conn
+    fn start<S>(ws: WebSocketStream<S>, spy: bool, tasks: &TaskTracker) -> Conn
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -69,13 +70,13 @@ impl Conn {
         let (inbound_tx, inbound) = mpsc::unbounded_channel();
         let (closed_tx, closed) = watch::channel(None);
         let open = Arc::new(AtomicBool::new(true));
-        tokio::spawn(drive(ws, out_rx, inbound_tx, closed_tx, open.clone()));
+        tasks.spawn(drive(ws, out_rx, inbound_tx, closed_tx, open.clone()));
         let spied = spy.then(|| Arc::new(Spied { sent: Mutex::new(Vec::new()), deaf: AtomicBool::new(false) }));
         Conn { out, inbound: tokio::sync::Mutex::new(inbound), closed, open, spied }
     }
 
     /// A socket accepted by a listener, past its upgrade.
-    pub async fn accepted<S>(stream: S, max_message_bytes: usize) -> Conn
+    pub async fn accepted<S>(stream: S, max_message_bytes: usize, tasks: &TaskTracker) -> Conn
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -88,7 +89,7 @@ impl Conn {
             Some(config),
         )
         .await;
-        Conn::start(ws, false)
+        Conn::start(ws, false, tasks)
     }
 
     /// Sends at once, while the socket is open.
@@ -229,7 +230,7 @@ pub(crate) struct OpenError {
 
 /// A websocket to `url`, once open, with no subprotocol and no
 /// compression.
-pub(crate) async fn open(url: &str, hooks: &Arc<dyn Hooks>) -> Result<Conn, OpenError> {
+pub(crate) async fn open(url: &str, hooks: &Arc<dyn Hooks>, tasks: &TaskTracker) -> Result<Conn, OpenError> {
     let refused = |cause: String| OpenError { status: None, retry_after_seconds: None, cause };
     if !hooks.open(url) {
         return Err(refused("refused by the test".into()));
@@ -247,7 +248,7 @@ pub(crate) async fn open(url: &str, hooks: &Arc<dyn Hooks>) -> Result<Conn, Open
         .max_frame_size(Some(MAX_SERVICE_MESSAGE_BYTES));
     match tokio_tungstenite::connect_async_with_config(request, Some(config), true).await {
         Ok((ws, _)) => {
-            let conn = Conn::start(ws, true);
+            let conn = Conn::start(ws, true, tasks);
             hooks.opened(Opened::of(url, &conn));
             Ok(conn)
         }

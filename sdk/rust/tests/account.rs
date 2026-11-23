@@ -2,7 +2,8 @@ mod common;
 
 use std::sync::Arc;
 
-use colibrii::{AccountState, Connections, Device, Error, InvalidInput, MemoryStore, ServiceError};
+use colibrii::testing::Msg;
+use colibrii::{AccountState, Connections, Device, Error, InvalidInput, MemoryStore, ServiceError, StopReason};
 use common::*;
 use serde_json::json;
 
@@ -227,12 +228,13 @@ async fn lists_renames_and_replaces_device_data() {
     let data = json!({ "icon": "desktop" }).as_object().unwrap().clone();
     desk.devices().set_data(&desk_id, data).await.unwrap();
     let devices = phone.devices().list().await.unwrap();
-    let seen: Vec<_> = devices.into_iter().map(|entry| (entry.device_id, entry.name, json!(entry.data))).collect();
+    let seen: Vec<_> =
+        devices.into_iter().map(|entry| (entry.device_id, entry.name, json!(entry.data), entry.online)).collect();
     assert_eq!(
         seen,
         vec![
-            (desk_id, "Desk".to_owned(), json!({ "icon": "desktop" })),
-            (phone_id.clone(), "Pocket".to_owned(), json!({})),
+            (desk_id, "Desk".to_owned(), json!({ "icon": "desktop" }), true),
+            (phone_id.clone(), "Pocket".to_owned(), json!({}), true),
         ]
     );
     let refused = desk.devices().rename(&phone_id, "").await.unwrap_err();
@@ -244,4 +246,154 @@ async fn a_device_list_call_needs_an_enrollment() {
     let kit = Kit::new();
     let laptop = kit.device().await;
     assert_eq!(laptop.devices().list().await.unwrap_err(), Error::NotEnrolled);
+}
+
+#[tokio::test]
+async fn reads_as_signed_out_once_another_device_removes_it() {
+    let kit = Kit::new();
+    let account = new_account_id();
+    let desk = kit.device().await;
+    let store = Arc::new(MemoryStore::new());
+    let phone = kit.device_in(&store).await;
+    kit.enroll(&desk, &account, "Desk").await;
+    let phone_id = device_id_of(&kit.enroll(&phone, &account, "Phone").await);
+    desk.devices().remove(&phone_id).await.unwrap();
+    let removed = wait_for(&phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    assert_eq!(removed, REMOVED);
+    assert_eq!(document(&store), Some(json!({ "deviceId": phone_id, "removed": true })));
+    assert_eq!(phone.devices().list().await.unwrap_err(), Error::NotEnrolled);
+    assert!(phone.sign_out().await.unwrap());
+    assert_eq!(phone.account().get(), SIGNED_OUT);
+    assert_eq!(document(&store), None);
+}
+
+#[tokio::test]
+async fn stops_a_single_device_when_a_second_copy_of_it_connects() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    let first = kit.device_in(&store).await;
+    let enrolled = kit.enroll(&first, &new_account_id(), "Laptop").await;
+    let second = kit.device_in(&store).await;
+    connected(&second).await;
+    let stopped = wait_for(&first.account(), |state| matches!(state, AccountState::Stopped { .. })).await;
+    assert_eq!(
+        stopped,
+        AccountState::Stopped {
+            device_id: device_id_of(&enrolled),
+            account_id: account_id_of(&enrolled),
+            reason: StopReason::Superseded,
+        }
+    );
+}
+
+// ---- A removal ----
+
+const REMOVED: AccountState = AccountState::SignedOut { removed: true };
+
+/// A device in `store` that another device of the account removed while it
+/// ran.
+async fn removed_in(kit: &Kit, store: &Arc<MemoryStore>) -> String {
+    let account = new_account_id();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &account, "Desk").await;
+    let phone = kit.device_in(store).await;
+    desk.devices().remove(&device_id_of(&kit.enroll(&phone, &account, "Phone").await)).await.unwrap();
+    wait_for(&phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    phone.close().await;
+    desk.close().await;
+    account
+}
+
+#[tokio::test]
+async fn a_removal_lasts_into_the_next_run_on_the_same_store() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    removed_in(&kit, &store).await;
+    let later = kit.device_in(&store).await;
+    assert_eq!(later.account().get(), REMOVED);
+}
+
+#[tokio::test]
+async fn a_removal_is_kept_by_a_device_that_learns_of_it_as_it_starts() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    let account = new_account_id();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &account, "Desk").await;
+    let first = kit.device_in(&store).await;
+    let phone_id = device_id_of(&kit.enroll(&first, &account, "Phone").await);
+    first.close().await;
+    desk.devices().remove(&phone_id).await.unwrap();
+    let phone = kit.device_in(&store).await;
+    wait_for(&phone.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    phone.close().await;
+    let later = kit.device_in(&store).await;
+    assert_eq!(later.account().get(), REMOVED);
+}
+
+#[tokio::test]
+async fn a_removal_is_cleared_by_enrolling() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    let account = removed_in(&kit, &store).await;
+    let phone = kit.device_in(&store).await;
+    let enrolled = kit.enroll(&phone, &account, "Phone").await;
+    phone.close().await;
+    let later = kit.device_in(&store).await;
+    assert_eq!(device_id_of(&connected(&later).await), device_id_of(&enrolled));
+}
+
+#[tokio::test]
+async fn a_removal_is_cleared_by_signing_out() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    removed_in(&kit, &store).await;
+    let phone = kit.device_in(&store).await;
+    assert!(phone.sign_out().await.unwrap());
+    phone.close().await;
+    let later = kit.device_in(&store).await;
+    assert_eq!(later.account().get(), SIGNED_OUT);
+}
+
+// ---- The hub socket ----
+
+#[tokio::test]
+async fn follows_the_roster_as_devices_come_and_go() {
+    let kit = Kit::new();
+    let account = new_account_id();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &account, "Desk").await;
+    let phone = kit.device().await;
+    let phone_id = device_id_of(&kit.enroll(&phone, &account, "Phone").await);
+    let roster = wait_for(&desk.roster(), |peers| !peers.is_empty()).await;
+    assert_eq!(roster.iter().map(|peer| peer.device_id.clone()).collect::<Vec<_>>(), vec![phone_id]);
+    phone.close().await;
+    wait_for(&desk.roster(), |peers| peers.is_empty()).await;
+}
+
+#[tokio::test]
+async fn connects_again_after_the_service_drops_it() {
+    let kit = Kit::new();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &new_account_id(), "Desk").await;
+    let hub_socket = kit.net.hub_socket();
+    // A message past the cap, which the service closes the socket for.
+    hub_socket.send(Msg::Text("x".repeat(70_000)));
+    assert_eq!(hub_socket.closed().await.code, 1009);
+    wait_for(&desk.account(), |state| matches!(state, AccountState::Enrolled { connected: false, .. })).await;
+    connected(&desk).await;
+}
+
+#[tokio::test]
+async fn settles_ten_seconds_after_it_connects() {
+    let kit = Kit::new();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &new_account_id(), "Desk").await;
+    assert!(matches!(desk.account().get(), AccountState::Enrolled { settled: false, .. }));
+    let mut account = desk.account();
+    let settled = tokio::time::timeout(
+        std::time::Duration::from_secs(12),
+        account.wait_for(|state| matches!(state, AccountState::Enrolled { settled: true, .. })),
+    );
+    assert!(settled.await.is_ok());
 }

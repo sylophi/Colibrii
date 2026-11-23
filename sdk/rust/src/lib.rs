@@ -6,6 +6,8 @@ mod conn;
 mod device;
 mod errors;
 mod hub_api;
+mod hub_socket;
+mod liveness;
 mod runtime;
 mod session;
 mod store;

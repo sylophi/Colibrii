@@ -240,7 +240,7 @@ pub async fn wait_for<T: Clone>(watch: &Watch<T>, test: impl FnMut(&T) -> bool) 
 }
 
 pub async fn connected(device: &Device) -> AccountState {
-    wait_for(&device.account(), |state| matches!(state, AccountState::Enrolled { .. })).await
+    wait_for(&device.account(), |state| matches!(state, AccountState::Enrolled { connected: true, .. })).await
 }
 
 /// Runs `check` until it passes.
