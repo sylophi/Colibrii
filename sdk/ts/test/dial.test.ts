@@ -21,6 +21,7 @@ import { layerListenerSockets, layerWebSockets } from "../src/node/sockets.ts";
 import * as Base64Url from "../src/wire/base64url.ts";
 import {
   CLOSE_HANDSHAKE_REFUSED,
+  CLOSE_PROTOCOL_ERROR,
   CLOSE_TOO_BIG,
   makeLinkTicket,
   MAX_APP_MESSAGE_BYTES,
@@ -487,6 +488,38 @@ describe.runIf(hasLanAddress)("a link between two devices", () => {
         yield* kept.send(bytes("still"));
         const next = yield* admitted.messages.pipe(Stream.runHead);
         expect(Option.map(next, text)).toEqual(Option.some("still"));
+      }),
+    ));
+
+  it("closes with 1002 a socket that sends anything before the answer to its hello", () =>
+    run(
+      Effect.gen(function* () {
+        const { deciding, decided, admit } = yield* held;
+        const phoneSpy = makeSpy();
+        const { phone, deskId } = yield* pair(admit, {
+          phone: phoneSpy.layer,
+        });
+        const dialing = yield* phone
+          .dial(deskId, bytes("hi"))
+          .pipe(Effect.scoped, Effect.forkChild);
+        yield* Deferred.await(deciding);
+        // The sockets past their hello: the first message, then it.
+        const asked = phoneSpy.opened.filter(
+          (entry) =>
+            !entry.url.includes("/connect?") && entry.sent.length === 2,
+        );
+        expect(asked.length).toBeGreaterThan(0);
+        for (const entry of asked) entry.conn.send(new Uint8Array(32));
+        for (const entry of asked) {
+          const closed = yield* entry.conn.closed.pipe(
+            Effect.timeoutOption("2 seconds"),
+          );
+          expect(Option.map(closed, (close) => close.code)).toEqual(
+            Option.some(CLOSE_PROTOCOL_ERROR),
+          );
+        }
+        yield* Deferred.succeed(decided, undefined);
+        yield* Fiber.interrupt(dialing);
       }),
     ));
 

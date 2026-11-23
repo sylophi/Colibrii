@@ -108,7 +108,10 @@ pub struct Answered {
 
 pub fn answer_handshake(ticket: &str, message: &[u8], key: &KeyPair, e: Option<KeyPair>) -> Option<Answered> {
     let mut handshake = HandshakeState::responder(&link_prologue(ticket), key.clone(), e);
-    handshake.read_message(message).ok()?;
+    let (payload, _) = handshake.read_message(message).ok()?;
+    if !payload.is_empty() {
+        return None;
+    }
     let (second, transport) = handshake.write_message(&[]).ok()?;
     Some(Answered {
         dialer_key: handshake.remote_static_key()?,
@@ -119,7 +122,8 @@ pub fn answer_handshake(ticket: &str, message: &[u8], key: &KeyPair, e: Option<K
 }
 
 pub fn finish_handshake(handshake: &mut HandshakeState, second: &[u8]) -> Option<Transport> {
-    handshake.read_message(second).ok()?.1
+    let (payload, transport) = handshake.read_message(second).ok()?;
+    transport.filter(|_| payload.is_empty())
 }
 
 // ---- Transport messages ----
@@ -336,5 +340,26 @@ impl AppMessageJoiner {
         }
         self.buffer.extend_from_slice(&body);
         if more { Joined::Partial } else { Joined::Message(std::mem::take(&mut self.buffer)) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::noise::KeyPair;
+
+    #[test]
+    fn a_handshake_message_that_carries_a_payload_is_refused() {
+        let (ticket, dialer, listener) = (make_link_ticket(), KeyPair::generate(), KeyPair::generate());
+        let mut dialing = HandshakeState::initiator(&link_prologue(&ticket), dialer.clone(), listener.public_key, None);
+        let (first, _) = dialing.write_message(&[1]).unwrap();
+        assert!(answer_handshake(&ticket, &first, &listener, None).is_none());
+
+        let (first, mut dialing) = start_handshake(&ticket, &dialer, listener.public_key, None).unwrap();
+        let (_, first) = decode_first_message(&first).unwrap();
+        let mut answering = HandshakeState::responder(&link_prologue(&ticket), listener, None);
+        answering.read_message(first).unwrap();
+        let (second, _) = answering.write_message(&[1]).unwrap();
+        assert!(finish_handshake(&mut dialing, &second).is_none());
     }
 }

@@ -220,15 +220,27 @@ export const make = Effect.fnUntraced(function* (options: {
         reason: "the ticket expired",
       });
     }
-    const welcome = yield* options.listen
-      .admit({
-        deviceId: hello.deviceId,
-        connectionId: hello.connectionId,
-        arrival,
-        appHello: hello.appHello,
-      })
-      .pipe(Effect.result);
-    // The peer went, or left the roster, while the app decided.
+    // The dialer sends nothing more until the answer. A socket that
+    // closes meanwhile fails the admission.
+    const answered = yield* Effect.raceFirst(
+      options.listen
+        .admit({
+          deviceId: hello.deviceId,
+          connectionId: hello.connectionId,
+          arrival,
+          appHello: hello.appHello,
+        })
+        .pipe(Effect.result, Effect.asSome),
+      Effect.as(conn.receive, Option.none()),
+    );
+    if (Option.isNone(answered)) {
+      return conn.close(
+        CLOSE_PROTOCOL_ERROR,
+        "expected nothing before the answer",
+      );
+    }
+    const welcome = answered.value;
+    // The peer left the roster while the app decided.
     if (!conn.isOpen()) return;
     const welcomed = welcome._tag === "Success";
     const appBytes = welcomed ? welcome.success : welcome.failure.appRefusal;

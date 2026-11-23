@@ -137,13 +137,13 @@ export const answerHandshake = (options: {
         s: options.key,
         e: options.e,
       });
-      handshake.readMessage(options.message);
+      const { payload } = handshake.readMessage(options.message);
       const { message, transport } = handshake.writeMessage(EMPTY);
-      return { handshake, message, transport };
+      return { handshake, payload, message, transport };
     }),
-    ({ handshake, message, transport }) => {
+    ({ handshake, payload, message, transport }) => {
       const dialerKey = handshake.remoteStaticKey();
-      return dialerKey === null || transport === null
+      return dialerKey === null || transport === null || payload.length > 0
         ? Option.none()
         : Option.some({
             dialerKey,
@@ -159,8 +159,11 @@ export const finishHandshake = (
   second: Uint8Array,
 ): Option.Option<Transport> =>
   Option.flatMap(
-    tryNoise(() => handshake.readMessage(second).transport),
-    Option.fromNullishOr,
+    tryNoise(() => handshake.readMessage(second)),
+    (read) =>
+      read.payload.length > 0
+        ? Option.none()
+        : Option.fromNullishOr(read.transport),
   );
 
 // ---- Transport messages ----

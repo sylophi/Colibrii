@@ -459,11 +459,17 @@ impl Listener {
             app_hello: hello.app_hello.clone(),
             decide,
         });
-        // The peer went, or left the roster, while the app decided.
+        // The dialer sends nothing more until the answer.
         let decision = tokio::select! {
             decision = decided => decision.unwrap_or(Decision::Refuse { reason: "refused".into(), app_refusal: None }),
-            _ = conn.closed() => return None,
+            sent = conn.receive() => {
+                if sent.is_ok() {
+                    conn.close(CLOSE_PROTOCOL_ERROR, "expected nothing before the answer");
+                }
+                return None;
+            }
         };
+        // The peer left the roster while the app decided.
         if !conn.is_open() {
             return None;
         }
@@ -711,5 +717,22 @@ mod tests {
             _ => None,
         };
         assert_eq!(status, Some(StatusCode::UNAUTHORIZED));
+    }
+
+    #[tokio::test]
+    async fn a_socket_that_sends_more_before_the_answer_to_its_hello_closes_with_1002() {
+        let listening = listening().await;
+        let (mut far, mut transport, admitting) = listening.hello(&fakes::ids().1).await;
+        let data = TransportMessage::Data { more: false, body: b"early".to_vec() };
+        far.send(Message::binary(seal_transport_message(&mut transport, &data).unwrap())).await.unwrap();
+        let close = loop {
+            match timeout(Duration::from_secs(2), far.next()).await {
+                Ok(Some(Ok(Message::Close(frame)))) => break frame.map(|frame| u16::from(frame.code)),
+                Ok(Some(Ok(_))) => {}
+                other => panic!("no close: {other:?}"),
+            }
+        };
+        assert_eq!(close, Some(CLOSE_PROTOCOL_ERROR));
+        assert!(admitting.await.unwrap().is_none());
     }
 }
