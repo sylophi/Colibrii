@@ -25,5 +25,6 @@ The wire is specified in [spec/](spec/README.md). The service is in
 [sdk/ts](sdk/ts/README.md) holds the wire (the schemas the service and
 the SDK share, Noise, the relay's sealing, and the peer link's
 handshake and messages) and the device runtime, with its bindings for
-Node and for web pages. The test vectors in `spec/vectors/` cover the
-wire.
+Node and for web pages. The Rust SDK in [sdk/rust](sdk/rust/README.md)
+is the same device for desktop apps and programs on a server. The test
+vectors in `spec/vectors/` cover the wire.
