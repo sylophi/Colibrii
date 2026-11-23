@@ -3,7 +3,7 @@
 // signed in to. With --local, in the database `pnpm dev` serves instead.
 //
 //   app add <id> --key <PEM file> [--origin <origin>]...
-//       [--oauth-client <id>] [--secret <name>] [--device-cap <n>]
+//       [--oauth-client <id>] [--secret-name <name>] [--device-cap <n>]
 //   app list
 //   app remove <id>
 //
@@ -24,22 +24,29 @@ import {
 
 const serviceDir = join(import.meta.dirname, "..");
 
-const { values, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    local: { type: "boolean", default: false },
-    key: { type: "string" },
-    origin: { type: "string", multiple: true, default: [] },
-    "oauth-client": { type: "string" },
-    secret: { type: "string" },
-    "device-cap": { type: "string" },
-  },
-});
-
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
+
+const parse = () => {
+  try {
+    return parseArgs({
+      allowPositionals: true,
+      options: {
+        local: { type: "boolean", default: false },
+        key: { type: "string" },
+        origin: { type: "string", multiple: true, default: [] },
+        "oauth-client": { type: "string" },
+        "secret-name": { type: "string" },
+        "device-cap": { type: "string" },
+      },
+    });
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+};
+const { values, positionals } = parse();
 
 const execute = (sql: string) => {
   const target = values.local
@@ -73,7 +80,7 @@ const show = (app: App) =>
     app.id,
     `  origins: ${app.origins.join(" ") || "none"}`,
     `  OAuth client id: ${app.oauthClientId ?? "none"}`,
-    `  Clerk secret: ${app.clerkSecretName ?? "none"}`,
+    `  Clerk secret name: ${app.clerkSecretName ?? "none"}`,
     `  device cap: ${app.deviceCap}`,
   ].join("\n");
 
@@ -96,9 +103,9 @@ if (command === "add" && id !== undefined) {
       ...(values["oauth-client"] === undefined
         ? {}
         : { oauthClientId: values["oauth-client"] }),
-      ...(values.secret === undefined
+      ...(values["secret-name"] === undefined
         ? {}
-        : { clerkSecretName: values.secret }),
+        : { clerkSecretName: values["secret-name"] }),
       ...(cap === undefined ? {} : { deviceCap: Number(cap) }),
     });
   } catch (error) {
@@ -118,7 +125,7 @@ if (command === "add" && id !== undefined) {
   process.stdout.write(`removed ${id}\n`);
 } else {
   fail(
-    "usage: app add <id> --key <PEM file> [--origin <origin>]... [--oauth-client <id>] [--secret <name>] [--device-cap <n>]\n" +
+    "usage: app add <id> --key <PEM file> [--origin <origin>]... [--oauth-client <id>] [--secret-name <name>] [--device-cap <n>]\n" +
       "       app list\n" +
       "       app remove <id>\n" +
       "With --local, in the database `pnpm dev` serves.",

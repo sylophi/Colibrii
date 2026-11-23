@@ -27,15 +27,15 @@ for the tunnel domain, and `inkwell` for an app, as the spec does.
 - `src/tunnel.ts` provisions and removes each device's Cloudflare
   tunnel through the Cloudflare API.
 - `src/config.ts` reads the rest of the instance's configuration as
-  the Worker starts. A missing or malformed value stops the Worker there, and
-  every request answers 500 until it is fixed, with the reason in the
-  Worker's logs.
+  the Worker starts. A missing or malformed value stops the Worker
+  there, and every request answers 500 until it is fixed, with the
+  reason in the Worker's logs.
 
 ## Setting up an instance
 
 You need a Cloudflare account, Node 24 and pnpm, and this repository
-with `pnpm install` run at its root. Every `wrangler` command below runs
-from `service/`, as `pnpm exec wrangler …`, signed in with
+with `pnpm install` run at its root. Every command below runs from
+`service/`, with Wrangler as `pnpm exec wrangler …`, signed in with
 `pnpm exec wrangler login`.
 
 ### 1. Two zones
@@ -96,7 +96,7 @@ cp instance.example.jsonc instance.jsonc
 ### 5. Deploy
 
 ```sh
-pnpm --filter ./service run deploy
+pnpm run deploy
 ```
 
 It applies the database's migrations, then deploys the Worker with
@@ -109,9 +109,9 @@ Each app is a row in the instance's database, which this command
 writes through Wrangler with `instance.jsonc`:
 
 ```sh
-pnpm --filter ./service run app add inkwell --key clerk.pem \
+pnpm run app add inkwell --key clerk.pem \
   --origin inkwell://app --origin https://app.inkwell.example \
-  --oauth-client <client id> --secret INKWELL_CLERK_SECRET_KEY
+  --oauth-client '<client id>' --secret-name INKWELL_CLERK_SECRET_KEY
 ```
 
 | Option | What it is |
@@ -120,7 +120,7 @@ pnpm --filter ./service run app add inkwell --key clerk.pem \
 | `--key` | The path of a PEM file holding the public key of the app's Clerk instance, which checks its login tokens. |
 | `--origin` | One for each origin its Clerk session tokens come from, such as its desktop window's `inkwell://app` and its web client's `https://app.inkwell.example`. `http://localhost:*` stands for `http://localhost` on any port, for a development web client whose port differs per checkout. |
 | `--oauth-client` | Optional. The client id of its Clerk OAuth application, for signing in through OAuth or with a code. Without it, no OAuth access token is accepted. |
-| `--secret` | Optional. The name of the Worker secret that holds its Clerk secret key, such as `INKWELL_CLERK_SECRET_KEY`. Without it, `POST /sign-in-token` answers `SignInTokensOff` for the app. |
+| `--secret-name` | Optional. The name of the Worker secret that holds its Clerk secret key, such as `INKWELL_CLERK_SECRET_KEY`. Without it, `POST /sign-in-token` answers `SignInTokensOff` for the app. |
 | `--device-cap` | Optional. How many devices an account of the app may have, 16 unless set, and at most 1,024. |
 
 Adding an app under an id that is taken replaces that app, which is how
@@ -148,9 +148,9 @@ pnpm exec wrangler secret put INKWELL_CLERK_SECRET_KEY -c instance.jsonc
   Worker, so it goes straight from `openssl` into Wrangler. Changing it
   only voids the tickets of the last minute.
 - `CLOUDFLARE_API_TOKEN` is the token from step 2.
-- One for each app added with `--secret`, under that name: the app's
-  Clerk secret key (`sk_live_…`), from the Clerk dashboard's API keys
-  page. The service uses it only to mint sign-in tokens.
+- One for each app added with `--secret-name`, under that name: the
+  app's Clerk secret key (`sk_live_…`), from the Clerk dashboard's API
+  keys page. The service uses it only to mint sign-in tokens.
 
 A secret takes effect without a deploy. Until the first two are set,
 the Worker answers 500. Until an app's is set, `POST /sign-in-token`
@@ -194,8 +194,8 @@ Its client id goes in `--oauth-client`. The instance's Account Portal
 must be on, since it hosts the page where the code is approved. The
 access token the device ends with is its login token for enrollment.
 An app that also wants a Clerk session on that device is added with
-`--secret` and has that secret set, and trades the access token for a
-sign-in token at `POST /sign-in-token`.
+`--secret-name` and has that secret set, and trades the access token
+for a sign-in token at `POST /sign-in-token`.
 
 ## Limits on what a stranger can cost
 
