@@ -47,7 +47,7 @@ Effect's unstable HTTP modules, so it names the exact version it was
 built with.
 
 ```sh
-pnpm add https://github.com/sylophi/Colibrii/releases/download/v0.1.1/colibrii-sdk-0.1.1.tgz effect@4.1.4
+pnpm add https://github.com/sylophi/Colibrii/releases/download/v0.1.2/colibrii-sdk-0.1.2.tgz effect@4.1.4
 ```
 
 In a checkout of this repository, `pnpm pack:sdk` builds the same
