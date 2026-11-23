@@ -366,7 +366,12 @@ impl HubSocket {
             },
         };
         let url = connect_url(self.inner.api.hub(), &ticket);
-        let conn = match timeout(ADMISSION, conn::open(&url, &self.inner.options.hooks, &self.inner.tasks)).await {
+        let conn = match timeout(
+            ADMISSION,
+            conn::open(&url, self.inner.options.hooks.headers(), &self.inner.options.hooks, &self.inner.tasks),
+        )
+        .await
+        {
             Err(_) => return failed(Duration::ZERO),
             Ok(Err(error)) => {
                 return match (error.status, error.retry_after_seconds) {

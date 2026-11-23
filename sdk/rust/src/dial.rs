@@ -35,7 +35,7 @@ async fn shake(
     identity: Arc<Identity>,
     listener_key: [u8; 32],
 ) -> Result<(Conn, Transport), CandidateFailure> {
-    let conn = conn::open(&candidate.url, &inner.options.hooks, &inner.tasks)
+    let conn = conn::open(&candidate.url, Vec::new(), &inner.options.hooks, &inner.tasks)
         .await
         .map_err(|error| failure(&candidate, None, error.cause))?;
     let (first, mut handshake) = start_handshake(&candidate.ticket, &identity.key, listener_key, None)
