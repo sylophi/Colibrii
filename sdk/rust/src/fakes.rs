@@ -59,7 +59,8 @@ pub async fn listened(
 }
 
 /// A hub at the address this gives that answers every request with
-/// `status`, such as "202 Accepted", and no body.
+/// `status`, such as "202 Accepted", and any header lines after it, and no
+/// body.
 pub async fn hub_answering(status: &'static str) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -315,6 +315,11 @@ fn failed(wait_at_least: Duration) -> Result<Run, Stop> {
     Ok(Run { uptime: Duration::ZERO, wait_at_least })
 }
 
+/// A retry-after past what a Duration holds waits as long as one can.
+fn wait_of(seconds: f64) -> Duration {
+    Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
+}
+
 fn stop_of(code: u16) -> Option<Stop> {
     match code {
         CLOSE_DEVICE_REMOVED => Some(Stop::Removed),
@@ -416,7 +421,7 @@ impl HubSocket {
                     return Err(stop);
                 }
                 return match error {
-                    Error::RateLimited { retry_after_seconds } => failed(Duration::from_secs_f64(retry_after_seconds)),
+                    Error::RateLimited { retry_after_seconds } => failed(wait_of(retry_after_seconds)),
                     _ => failed(Duration::ZERO),
                 };
             }
@@ -433,7 +438,7 @@ impl HubSocket {
         .await
         {
             Err(_) => return failed(Duration::ZERO),
-            Ok(Err(error)) => return failed(error.retry_after_seconds.map_or(Duration::ZERO, Duration::from_secs_f64)),
+            Ok(Err(error)) => return failed(error.retry_after_seconds.map_or(Duration::ZERO, wait_of)),
             Ok(Ok(conn)) => Arc::new(conn),
         };
         let current = Arc::new(Live::new(conn.clone()));
@@ -682,6 +687,21 @@ mod tests {
         attempt.hear(&presence);
         assert!(hub.shared.roster().is_none());
         assert!(hub.live.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_rate_limit_that_asks_to_wait_past_all_time_waits_as_long_as_it_can() {
+        let hub = fakes::hub_answering("429 Too Many Requests\r\nretry-after: 1e300").await;
+        let store = Arc::new(crate::store::MemoryStore::new());
+        let options = crate::device::Options::new(hub, "inkwell", Connections::Single, store)
+            .runtime(tokio::runtime::Handle::current());
+        let device = crate::device::Device::new(options).await.unwrap();
+        let attempt = FakeAttempt::new(device.inner(), Shared::new()).await;
+        let run = attempt.hub.clone().attempt().await.ok().unwrap();
+        assert_eq!(run.wait_at_least, Duration::MAX);
+        let mut ladder = Ladder::default();
+        let waiting = ladder.wait(&run, device.inner().wakes.subscribe());
+        assert!(timeout(Duration::from_millis(20), waiting).await.is_err());
     }
 
     #[tokio::test]
