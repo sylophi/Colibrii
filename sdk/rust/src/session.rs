@@ -114,15 +114,11 @@ impl Session {
         let hub = HubSocket::new(inner.clone(), shared.clone(), identity.clone(), answer_for(listener));
         let session = Arc::new(Session { identity, hub: hub.clone(), shared: shared.clone(), inner: inner.clone() });
 
-        let mut roster = shared.roster.subscribe();
-        let (following, sweeping) = (inner.clone(), shared.clone());
+        let (mut roster, following) = (shared.follow_roster(), inner.clone());
         let device_id = stored.device_id.clone();
         shared.spawn(async move {
             loop {
                 let now = roster.borrow_and_update().clone();
-                if let Some(now) = &now {
-                    sweeping.sweep(now);
-                }
                 following.peers.send_replace(now.as_ref().map(|now| now.peers.clone()).unwrap_or_default());
                 following.account.send_modify(|state| {
                     if let AccountState::Enrolled { device_id: enrolled, connected, settled, .. } = state
@@ -158,5 +154,38 @@ impl Session {
         self.shared.tasks.wait().await;
         self.inner.peers.send_replace(Vec::new());
         self.inner.tunnel.send_replace(TunnelState::Off);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fakes;
+    use crate::hub_socket::{FakeAttempt, Join};
+
+    #[tokio::test]
+    async fn a_peer_that_leaves_a_settled_roster_and_comes_back_at_once_loses_its_links() {
+        let device = fakes::device().await;
+        let inner = device.inner().clone();
+        let enrollment = Enrollment {
+            device_id: fakes::ids().0,
+            account_id: "account".into(),
+            credential: "credential".into(),
+            private_key: KeyPair::generate().private_key,
+            port: None,
+        };
+        let session = Session::start(inner.clone(), enrollment).await.unwrap();
+        let attempt = FakeAttempt::new(&inner, session.shared.clone()).await;
+        let (peer, connection_id) = fakes::ids();
+        let (link, key, _far) = fakes::listened(&inner, &peer, &connection_id).await;
+        let (with, without) = (fakes::presence(&[(&peer, key)]), fakes::presence(&[]));
+        attempt.hear(&with);
+        attempt.settle();
+        assert_eq!(session.shared.join(&link), Join::Joined);
+        attempt.hear(&without);
+        attempt.hear(&with);
+        tokio::task::yield_now().await;
+        assert!(link.is_ended());
+        session.end().await;
     }
 }

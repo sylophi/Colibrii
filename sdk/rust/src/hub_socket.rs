@@ -2,11 +2,11 @@
 //! enrolled, and the relay's asks over it (spec/relay.md): this device's
 //! asks of its peers, and its answers to theirs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use reqwest::Method;
@@ -62,11 +62,15 @@ impl Roster {
 /// it.
 pub(crate) struct Shared {
     /// Set by the hub socket: none while it is down.
-    pub roster: watch::Sender<Option<Roster>>,
+    roster: watch::Sender<Option<Roster>>,
+    /// The listener's sweep of the peers a settled roster names.
+    settled_sweep: OnceLock<SettledSweep>,
     links: Mutex<Links>,
     pub tasks: TaskTracker,
     pub ended: CancellationToken,
 }
+
+pub(crate) type SettledSweep = Box<dyn Fn(&HashSet<String>) + Send + Sync>;
 
 #[derive(Default)]
 struct Links {
@@ -87,6 +91,7 @@ impl Shared {
     pub fn new() -> Arc<Shared> {
         Arc::new(Shared {
             roster: watch::channel(None).0,
+            settled_sweep: OnceLock::new(),
             links: Mutex::new(Links::default()),
             tasks: TaskTracker::new(),
             ended: CancellationToken::new(),
@@ -100,6 +105,27 @@ impl Shared {
 
     pub fn roster(&self) -> Option<Roster> {
         self.roster.borrow().clone()
+    }
+
+    pub fn follow_roster(&self) -> watch::Receiver<Option<Roster>> {
+        self.roster.subscribe()
+    }
+
+    pub fn sweep_settled(&self, sweep: SettledSweep) {
+        let _ = self.settled_sweep.set(sweep);
+    }
+
+    /// Changes the roster, then sweeps what the new one no longer names,
+    /// before the next change: a watcher of the roster may see only the
+    /// latest of several. The hub socket publishes under its `live` lock,
+    /// which keeps the changes in turn.
+    fn publish(&self, change: impl FnOnce(&mut Option<Roster>)) {
+        self.roster.send_modify(change);
+        let Some(roster) = self.roster() else { return };
+        self.sweep(&roster);
+        if let Some(sweep) = self.settled_sweep.get().filter(|_| roster.settled) {
+            sweep(&roster.peers.iter().map(|peer| peer.device_id.clone()).collect());
+        }
     }
 
     /// The peer as the latest roster names it, while the hub socket is up.
@@ -147,7 +173,7 @@ impl Shared {
 
     /// A live roster ends the links of a peer that left it, once settled,
     /// or that it gives another key.
-    pub fn sweep(&self, roster: &Roster) {
+    fn sweep(&self, roster: &Roster) {
         let links: Vec<_> = self.links.lock().unwrap().all.clone();
         for link in links {
             let gone = match roster.get(&link.device_id) {
@@ -317,7 +343,7 @@ impl Drop for AttemptEnd {
         if live.as_ref().is_some_and(|now| Arc::ptr_eq(now, &self.live)) {
             *live = None;
         }
-        self.hub.shared.roster.send_replace(None);
+        self.hub.shared.publish(|roster| *roster = None);
         drop(live);
         self.ended.cancel();
         self.live.fail(|_| true, DialError::NotConnected);
@@ -489,7 +515,7 @@ impl HubSocket {
             return false;
         }
         *live = Some(current.clone());
-        self.shared.roster.send_modify(change);
+        self.shared.publish(change);
         true
     }
 
@@ -565,38 +591,58 @@ fn read_answer(current: &Live, from: &str, frame: &RelayFrame) {
     let _ = entry.answered.send(answer);
 }
 
+/// An attempt whose socket is up, read as its reader would.
+#[cfg(test)]
+pub(crate) struct FakeAttempt {
+    hub: Arc<HubSocket>,
+    live: Arc<Live>,
+    ended: CancellationToken,
+    admitted: watch::Sender<bool>,
+}
+
+#[cfg(test)]
+impl FakeAttempt {
+    /// One of a hub socket that publishes to `shared` and answers no ask.
+    pub async fn new(inner: &Arc<Inner>, shared: Arc<Shared>) -> FakeAttempt {
+        let identity = Arc::new(Identity {
+            device_id: crate::fakes::ids().0,
+            credential: "credential".into(),
+            key: KeyPair::generate(),
+        });
+        let answer: AnswerFn = Arc::new(|_, _| Box::pin(async { Answer::Refused("unknown-ask".into()) }));
+        let (conn, _) = crate::fakes::conn(&inner.tasks).await;
+        FakeAttempt {
+            hub: HubSocket::new(inner.clone(), shared, identity, answer),
+            live: Arc::new(Live::new(Arc::new(conn))),
+            ended: CancellationToken::new(),
+            admitted: watch::channel(false).0,
+        }
+    }
+
+    pub fn hear(&self, text: &str) {
+        self.hub.handle(&self.live, &self.ended, &self.admitted, text);
+    }
+
+    pub fn settle(&self) {
+        self.hub.publish(&self.live, |now| now.as_mut().unwrap().settled = true);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fakes;
-    use crate::wire::relay::Answer;
-
-    fn answer_nothing() -> AnswerFn {
-        Arc::new(|_, _| Box::pin(async { Answer::Refused("unknown-ask".into()) }))
-    }
-
-    /// A hub socket of `device`'s, and an attempt of its whose socket is up.
-    async fn attempt_of(device: &crate::Device) -> (Arc<HubSocket>, Arc<Live>) {
-        let inner = device.inner().clone();
-        let identity =
-            Arc::new(Identity { device_id: fakes::ids().0, credential: "credential".into(), key: KeyPair::generate() });
-        let hub = HubSocket::new(inner.clone(), Shared::new(), identity, answer_nothing());
-        let (conn, _) = fakes::conn(&inner.tasks).await;
-        let live = Arc::new(Live::new(Arc::new(conn)));
-        (hub, live)
-    }
 
     #[tokio::test]
     async fn a_presence_read_after_its_socket_closed_publishes_nothing() {
         let device = fakes::device().await;
-        let (hub, live) = attempt_of(&device).await;
-        let (ended, admitted) = (CancellationToken::new(), watch::channel(false).0);
-        let presence = fakes::presence(&[(&fakes::ids().0, KeyPair::generate().public_key)]);
-        hub.handle(&live, &ended, &admitted, &presence);
+        let attempt = FakeAttempt::new(device.inner(), Shared::new()).await;
+        let (hub, presence) = (&attempt.hub, fakes::presence(&[(&fakes::ids().0, KeyPair::generate().public_key)]));
+        attempt.hear(&presence);
         assert!(hub.shared.roster().is_some());
-        drop(AttemptEnd { hub: hub.clone(), live: live.clone(), ended: ended.clone() });
+        drop(AttemptEnd { hub: hub.clone(), live: attempt.live.clone(), ended: attempt.ended.clone() });
         // One the reader had taken before the end.
-        hub.handle(&live, &ended, &admitted, &presence);
+        attempt.hear(&presence);
         assert!(hub.shared.roster().is_none());
         assert!(hub.live.lock().unwrap().is_none());
     }

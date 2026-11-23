@@ -1,7 +1,7 @@
 //! The listener (spec/link.md, "Admission"), and this device's answer to a
 //! connectInfo ask (spec/relay.md, "connectInfo").
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -237,32 +237,19 @@ impl Listener {
             });
         }
         // Once the roster settled, a peer that left it spends no ticket, and
-        // its sockets not yet welcomed close. Its links close in the
-        // session's own sweep.
-        let mut roster = shared.roster.subscribe();
-        let sweeping = listener.clone();
-        shared.spawn(async move {
-            loop {
-                let online: Option<HashSet<String>> = roster
-                    .borrow_and_update()
-                    .as_ref()
-                    .filter(|roster| roster.settled)
-                    .map(|roster| roster.peers.iter().map(|peer| peer.device_id.clone()).collect());
-                if let Some(online) = online {
-                    let mut state = sweeping.state.lock().unwrap();
-                    state.tickets.keep_devices(&online);
-                    state.unreached.retain(|device_id, _| online.contains(device_id));
-                    for (conn, device_id) in state.unwelcomed.values() {
-                        if device_id.as_ref().is_some_and(|device_id| !online.contains(device_id)) {
-                            conn.close(CLOSE_GOING_AWAY, "left the roster");
-                        }
-                    }
-                }
-                if roster.changed().await.is_err() {
-                    return;
+        // its sockets not yet welcomed close.
+        let sweeping = Arc::downgrade(&listener);
+        shared.sweep_settled(Box::new(move |online| {
+            let Some(listener) = sweeping.upgrade() else { return };
+            let mut state = listener.state.lock().unwrap();
+            state.tickets.keep_devices(online);
+            state.unreached.retain(|device_id, _| online.contains(device_id));
+            for (conn, device_id) in state.unwelcomed.values() {
+                if device_id.as_ref().is_some_and(|device_id| !online.contains(device_id)) {
+                    conn.close(CLOSE_GOING_AWAY, "left the roster");
                 }
             }
-        });
+        }));
         Ok(listener)
     }
 
@@ -526,5 +513,37 @@ impl Listener {
         ConnectInfoResult::Available(
             candidates.into_iter().zip(minted).map(|((kind, url), ticket)| Candidate { kind, url, ticket }).collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fakes;
+    use crate::hub_socket::FakeAttempt;
+    use crate::wire::noise::KeyPair;
+
+    #[tokio::test]
+    async fn a_peer_that_leaves_a_settled_roster_and_comes_back_at_once_loses_its_tickets() {
+        let device = fakes::device().await;
+        let inner = device.inner().clone();
+        let identity =
+            Arc::new(Identity { device_id: fakes::ids().0, credential: "credential".into(), key: KeyPair::generate() });
+        let shared = Shared::new();
+        let listener = Listener::start(inner.clone(), identity, shared.clone(), &Listen::new(), 0).await.unwrap();
+        let attempt = FakeAttempt::new(&inner, shared.clone()).await;
+        let (peer, connection_id) = fakes::ids();
+        let (with, without) = (fakes::presence(&[(&peer, KeyPair::generate().public_key)]), fakes::presence(&[]));
+        attempt.hear(&with);
+        attempt.settle();
+        let ticket =
+            listener.state.lock().unwrap().tickets.mint(&peer, &connection_id, &[CandidateKind::Lan], wall_ms());
+        let ticket = ticket.unwrap().remove(0);
+        attempt.hear(&without);
+        attempt.hear(&with);
+        tokio::task::yield_now().await;
+        let check = listener.state.lock().unwrap().tickets.check(&ticket, CandidateKind::Lan, wall_ms());
+        assert!(!matches!(check, Check::Pending { .. }));
+        shared.ended.cancel();
     }
 }
