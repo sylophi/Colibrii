@@ -11,6 +11,7 @@ import {
   openSocket,
   sessionToken,
   startService,
+  cloudflareRequests,
 } from "@colibrii/harness";
 
 const { url, worker } = await startService();
@@ -494,6 +495,20 @@ describe("the registry", () => {
       (await api.call("GET", "/devices", { bearer: first.credential })).json,
     ).toEqual({ _tag: "DeviceRevoked" });
     expect((await list(stranger.credential)).devices).toHaveLength(1);
+  });
+});
+
+describe("removing a device", () => {
+  it("looks for its tunnel and record at Cloudflare's API as the harness answers it", async () => {
+    const device = await enrolled();
+    const before = cloudflareRequests.length;
+    const removed = await api.call("DELETE", `/devices/${device.deviceId}`, {
+      bearer: device.credential,
+    });
+    expect(removed.status).toBe(204);
+    const asked = cloudflareRequests.slice(before).map(({ url: to }) => to);
+    expect(asked.some((to) => to.endsWith("/cfd_tunnel"))).toBe(true);
+    expect(asked.some((to) => to.endsWith("/dns_records"))).toBe(true);
   });
 });
 

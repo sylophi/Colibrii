@@ -3,7 +3,12 @@
 // JSON line on stdin with a login token as one, and stops once stdin
 // ends, as it does when the process that started it exits.
 import { createInterface } from "node:readline";
-import { oauthToken, serve, sessionToken } from "./index.ts";
+import {
+  oauthToken,
+  onUnexpectedRequest,
+  serve,
+  sessionToken,
+} from "./index.ts";
 
 interface Ask {
   readonly account: string;
@@ -14,6 +19,15 @@ interface Ask {
   // Signed with the key of quill's Clerk instance instead.
   readonly otherKey?: boolean;
 }
+
+// Stopping fails every test after, which a request leaving the machine
+// should.
+onUnexpectedRequest(({ method, url }) => {
+  process.stderr.write(
+    `the service made a request leaving the machine: ${method} ${url}\n`,
+  );
+  process.exit(1);
+});
 
 const service = await serve();
 process.stdout.write(`${JSON.stringify({ url: service.url })}\n`);
