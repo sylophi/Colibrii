@@ -95,20 +95,11 @@ impl Session {
                         inner.options.hooks.clone(),
                         provision(&inner, &stored.credential, listener.reached_at),
                         shared.ended.clone(),
+                        inner.tunnel.clone(),
                     );
                     // Not cut short as the session ends: it stops its
                     // cloudflared first.
                     shared.tasks.spawn(runner);
-                    let mut state = running.state.subscribe();
-                    let following = inner.clone();
-                    shared.spawn(async move {
-                        loop {
-                            following.tunnel.send_replace(state.borrow_and_update().clone());
-                            if state.changed().await.is_err() {
-                                return;
-                            }
-                        }
-                    });
                     let (checking, mut wakes) = (running.clone(), inner.wakes.subscribe());
                     shared.spawn(async move {
                         while wakes.changed().await.is_ok() {

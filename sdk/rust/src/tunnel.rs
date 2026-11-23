@@ -79,7 +79,7 @@ impl Default for Timings {
             route_within: ms(60_000),
             restarts: vec![ms(1_000), ms(2_000), ms(4_000), ms(8_000), ms(16_000), ms(60_000)],
             healthy_for: ms(30_000),
-            stop_grace: ms(3_000),
+            stop_grace: STOP_GRACE,
         }
     }
 }
@@ -94,6 +94,8 @@ const REACHED_FILE: &str = "cloudflared.reached";
 const LOG_READ_EVERY: Duration = Duration::from_millis(100);
 /// How often a leftover asked to end is checked for until it has.
 const LEFTOVER_CHECK_EVERY: Duration = Duration::from_millis(50);
+/// From asking `cloudflared` to end to killing it.
+const STOP_GRACE: Duration = Duration::from_secs(3);
 const VERSION_WITHIN: Duration = Duration::from_secs(10);
 const IDENTIFY_WITHIN: Duration = Duration::from_secs(5);
 
@@ -202,7 +204,7 @@ fn is_alive(pid: u32) -> bool {
 /// to the edge, which notices seconds later. A device does this as its
 /// tunnel starts, and an app may at its own start.
 pub async fn end_leftover_cloudflared(directory: impl AsRef<Path>) {
-    crate::runtime::on_own_runtime(end_leftover(directory.as_ref().to_owned(), Timings::default().stop_grace)).await
+    crate::runtime::on_own_runtime(end_leftover(directory.as_ref().to_owned(), STOP_GRACE)).await
 }
 
 pub(crate) async fn end_leftover(directory: PathBuf, grace: Duration) {
@@ -275,18 +277,19 @@ struct Runner {
     ended: CancellationToken,
 }
 
-/// Runs the tunnel until `ended`, then stops its `cloudflared`. The
-/// returned future is the runner.
+/// Runs the tunnel until `ended`, then stops its `cloudflared`, saying how
+/// it goes in `state`. The returned future is the runner.
 pub(crate) fn run(
     options: TunnelOptions,
     hooks: Arc<dyn Hooks>,
     provision: Provision,
     ended: CancellationToken,
+    state: watch::Sender<TunnelState>,
 ) -> (Arc<RunningTunnel>, impl Future<Output = ()> + Send) {
-    let state = watch::channel(TunnelState::Starting).0;
+    state.send_replace(TunnelState::Starting);
     let (checks, checked) = mpsc::channel(1);
     let running = Arc::new(RunningTunnel { state: state.clone(), checks });
-    let runner = Arc::new(Runner {
+    let runner = Runner {
         options,
         hooks,
         provision,
@@ -295,7 +298,7 @@ pub(crate) fn run(
         http: reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().expect("a client"),
         routed: Mutex::new(None),
         ended,
-    });
+    };
     (running, async move { runner.run().await })
 }
 
@@ -640,7 +643,7 @@ while :; do sleep 1; done
     fn start(options: TunnelOptions, edge: &Edge, provision: Provision) -> Running {
         let ended = CancellationToken::new();
         let hooks: Arc<dyn Hooks> = Arc::new(Probe { origin: edge.origin.clone() });
-        let (tunnel, runner) = run(options, hooks, provision, ended.clone());
+        let (tunnel, runner) = run(options, hooks, provision, ended.clone(), watch::channel(TunnelState::Off).0);
         Running { tunnel, ended, runner: tokio::spawn(runner) }
     }
 
