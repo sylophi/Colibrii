@@ -336,8 +336,10 @@ async fn a_removal_is_cleared_by_enrolling() {
     let kit = Kit::new();
     let store = Arc::new(MemoryStore::new());
     let account = removed_in(&kit, &store).await;
+    let removed = document(&store).unwrap();
     let phone = kit.device_in(&store).await;
     let enrolled = kit.enroll(&phone, &account, "Phone").await;
+    assert_eq!(json!(device_id_of(&enrolled)), removed["deviceId"]);
     phone.close().await;
     let later = kit.device_in(&store).await;
     assert_eq!(device_id_of(&connected(&later).await), device_id_of(&enrolled));
@@ -353,6 +355,47 @@ async fn a_removal_is_cleared_by_signing_out() {
     phone.close().await;
     let later = kit.device_in(&store).await;
     assert_eq!(later.account().get(), SIGNED_OUT);
+}
+
+/// A `multi` device on `store`, one of several runs sharing it.
+async fn multi_in(kit: &Kit, store: &Arc<MemoryStore>) -> Device {
+    Device::new(kit.options_with(store.clone(), Connections::Multi)).await.unwrap()
+}
+
+#[tokio::test]
+async fn runs_the_enrollment_another_run_made_since() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    let account = new_account_id();
+    let desk = kit.device().await;
+    kit.enroll(&desk, &account, "Desk").await;
+    let slow = multi_in(&kit, &store).await;
+    let phone_id = device_id_of(&kit.enroll(&slow, &account, "Phone").await);
+    kit.net.hub_socket().set_deaf(true);
+    let quick = multi_in(&kit, &store).await;
+    connected(&quick).await;
+    desk.devices().remove(&phone_id).await.unwrap();
+    wait_for(&quick.account(), |state| matches!(state, AccountState::SignedOut { .. })).await;
+    let enrolled = kit.enroll(&quick, &account, "Phone").await;
+    // The old credential, which the service no longer takes.
+    slow.devices().list().await.unwrap_err();
+    assert_eq!(device_id_of(&connected(&slow).await), device_id_of(&enrolled));
+    assert_eq!(document(&store).unwrap()["deviceId"], json!(device_id_of(&enrolled)));
+}
+
+#[tokio::test]
+async fn reads_as_signed_out_where_another_run_signed_out_since() {
+    let kit = Kit::new();
+    let store = Arc::new(MemoryStore::new());
+    let slow = multi_in(&kit, &store).await;
+    kit.enroll(&slow, &new_account_id(), "Phone").await;
+    kit.net.hub_socket().set_deaf(true);
+    let quick = multi_in(&kit, &store).await;
+    connected(&quick).await;
+    assert!(quick.sign_out().await.unwrap());
+    assert_eq!(slow.devices().list().await.unwrap_err(), Error::Service(ServiceError::DeviceRevoked));
+    assert_eq!(wait_for(&slow.account(), |state| !matches!(state, AccountState::Enrolled { .. })).await, SIGNED_OUT);
+    assert_eq!(document(&store), None);
 }
 
 // ---- The hub socket ----

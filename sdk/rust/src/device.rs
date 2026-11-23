@@ -2,6 +2,7 @@
 //! while enrolled, follows its peers, dials them, and, when it listens, is
 //! dialed by them.
 
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use reqwest::Method;
@@ -516,17 +517,20 @@ impl Inner {
         }
     }
 
-    async fn start(self: &Arc<Self>, stored: Enrollment) -> Result<(), Error> {
-        self.end().await;
-        self.account.send_replace(AccountState::Enrolled {
-            device_id: stored.device_id.clone(),
-            account_id: stored.account_id.clone(),
-            connected: false,
-            settled: false,
-        });
-        let session = Session::start(self.clone(), stored).await?;
-        self.state.lock().unwrap().session = Some(session);
-        Ok(())
+    /// Boxed, as a session that stops settles, which may start another.
+    fn start(self: &Arc<Self>, stored: Enrollment) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        Box::pin(async move {
+            self.end().await;
+            self.account.send_replace(AccountState::Enrolled {
+                device_id: stored.device_id.clone(),
+                account_id: stored.account_id.clone(),
+                connected: false,
+                settled: false,
+            });
+            let session = Session::start(self.clone(), stored).await?;
+            self.state.lock().unwrap().session = Some(session);
+            Ok(())
+        })
     }
 
     /// The device stops, if `credential` is still the one it holds.
@@ -540,16 +544,24 @@ impl Inner {
             return;
         }
         self.end().await;
+        // Another run sharing the store may have acted since. One that
+        // enrolled again is run.
+        let stored = self.read_stored().await;
+        let now = stored.as_ref().ok().and_then(Option::as_ref).and_then(Stored::enrollment).cloned();
+        if let Some(now) = now.as_ref().filter(|now| now.credential != credential) {
+            self.state.lock().unwrap().enrollment = Some(now.clone());
+            let _ = self.start(now.clone()).await;
+            return;
+        }
         let reason = match stop {
             Stop::Removed => {
                 self.state.lock().unwrap().enrollment = None;
-                // Unless another run sharing the store enrolled since.
-                if let Ok(Some(Stored::Enrollment(stored))) = self.read_stored().await
-                    && stored.credential == credential
-                {
+                if now.is_some() {
                     let _ = self.write_stored(Stored::Removed { device_id: current.device_id }).await;
                 }
-                self.account.send_replace(REMOVED);
+                // One that signed out left nothing to mark.
+                let signed_out = matches!(stored, Ok(None | Some(Stored::Owed(_))));
+                self.account.send_replace(if signed_out { SIGNED_OUT } else { REMOVED });
                 return;
             }
             Stop::Superseded => StopReason::Superseded,
@@ -651,12 +663,13 @@ impl Inner {
         // A removal still owed keeps its device id, so enrolling replaces the
         // credential it was for, or meets DeviceEnrolledElsewhere and
         // delivers it. Once the service heard of the removal, a made-up id is
-        // made up again.
+        // made up again. A device the service removed keeps its id.
         let fresh = self.options.device_id.clone().unwrap_or_else(new_device_id);
         let key = KeyPair::generate();
-        let first_id = match (&owed, owing) {
-            (Some(owed), true) => owed.device_id.clone(),
-            _ => previous.as_ref().map_or_else(|| fresh.clone(), |previous| previous.device_id.clone()),
+        let first_id = match &stored {
+            Some(Stored::Owed(owed)) if owing => owed.device_id.clone(),
+            Some(Stored::Enrollment(Enrollment { device_id, .. }) | Stored::Removed { device_id }) => device_id.clone(),
+            _ => fresh.clone(),
         };
         let mut enrolled = self.enroll_as(&login_token, &first_id, &name, &data, &key).await;
         if let (Err(Error::Service(ServiceError::DeviceEnrolledElsewhere)), Some(owed), true) =
