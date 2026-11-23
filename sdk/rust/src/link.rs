@@ -41,7 +41,7 @@ pub enum LinkCloseCause {
     Replaced,
     /// This device signed out, was removed or stopped, or was closed.
     Stopped,
-    /// The other side broke the protocol.
+    /// The other side broke the protocol, or this side's cipher ran out.
     ProtocolError,
     /// The other side sent an app message over the cap.
     TooBig,
@@ -69,10 +69,19 @@ pub struct LinkClosed {
 }
 
 /// Seals a transport message and sends it at once, which keeps the sending
-/// cipher's counter and the socket in one order.
-pub(crate) fn send_sealed(conn: &Conn, transport: &mut Transport, message: &TransportMessage) {
-    if let Ok(sealed) = seal_transport_message(transport, message) {
-        conn.send(Msg::Binary(sealed));
+/// cipher's counter and the socket in one order. One that cannot be sealed,
+/// as once the cipher ran out of nonces, closes the socket with 1002, and
+/// this says it did not go.
+pub(crate) fn send_sealed(conn: &Conn, transport: &mut Transport, message: &TransportMessage) -> bool {
+    match seal_transport_message(transport, message) {
+        Ok(sealed) => {
+            conn.send(Msg::Binary(sealed));
+            true
+        }
+        Err(_) => {
+            conn.cut(CLOSE_PROTOCOL_ERROR, "cannot seal");
+            false
+        }
     }
 }
 
@@ -140,7 +149,9 @@ impl LiveLink {
     }
 
     pub fn send_message(&self, message: &TransportMessage) {
-        send_sealed(&self.conn, &mut self.transport.lock().unwrap(), message);
+        if !send_sealed(&self.conn, &mut self.transport.lock().unwrap(), message) {
+            self.end(CLOSE_PROTOCOL_ERROR, LinkCloseCause::ProtocolError);
+        }
     }
 
     async fn read(&self, heard: &Heard) {
@@ -267,7 +278,11 @@ impl Link {
         // them.
         let mut transport = live.transport.lock().unwrap();
         for piece in split_app_message(message) {
-            send_sealed(&live.conn, &mut transport, &piece);
+            if !send_sealed(&live.conn, &mut transport, &piece) {
+                drop(transport);
+                live.end(CLOSE_PROTOCOL_ERROR, LinkCloseCause::ProtocolError);
+                return Err(SendError::Closed);
+            }
         }
         Ok(())
     }
@@ -298,5 +313,33 @@ impl std::fmt::Debug for Link {
             .field("role", &self.role())
             .field("arrival", &self.arrival())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fakes;
+    use crate::wire::noise::CipherState;
+
+    #[tokio::test]
+    async fn a_message_its_cipher_cannot_seal_ends_the_link() {
+        let device = fakes::device().await;
+        let (conn, _far) = fakes::conn(&device.inner().tasks).await;
+        let (device_id, connection_id) = fakes::ids();
+        let live = LiveLink::new(NewLink {
+            conn: Arc::new(conn),
+            transport: Transport { send: CipherState::spent(), receive: CipherState::default() },
+            role: Role::Listener,
+            device_id,
+            peer_key: [9; 32],
+            connection_id,
+            arrival: CandidateKind::Lan,
+            greeting: Vec::new(),
+        });
+        let link = Link::of(live.clone());
+        assert!(matches!(link.send(b"hi"), Err(SendError::Closed)));
+        let closed = *live.closed.borrow();
+        assert_eq!(closed, Some(LinkClosed { code: CLOSE_PROTOCOL_ERROR, cause: LinkCloseCause::ProtocolError }));
     }
 }

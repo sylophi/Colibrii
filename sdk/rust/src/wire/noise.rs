@@ -82,7 +82,9 @@ impl KeyPair {
 /// low-order point) is refused, which section 12.1 allows.
 fn dh(key_pair: &KeyPair, public_key: &[u8; 32]) -> Result<[u8; 32], NoiseError> {
     let shared = x25519(key_pair.private_key, *public_key);
-    if shared.iter().all(|&byte| byte == 0) {
+    // Every byte looked at, whatever they hold.
+    let any = std::hint::black_box(shared.iter().fold(0u8, |any, &byte| any | byte));
+    if any == 0 {
         return Err(NoiseError::Key);
     }
     Ok(shared)
@@ -125,7 +127,9 @@ fn sha256(parts: &[&[u8]]) -> [u8; 32] {
 
 // ---- Section 5.1: CipherState ----
 
-#[derive(Clone, Default)]
+/// Not `Clone`, as no state that seals is: two copies would seal under one
+/// key and nonce.
+#[derive(Default)]
 pub struct CipherState {
     k: Option<[u8; 32]>,
     n: u64,
@@ -176,9 +180,16 @@ impl CipherState {
     }
 }
 
+#[cfg(test)]
+impl CipherState {
+    /// One whose nonces ran out.
+    pub(crate) fn spent() -> CipherState {
+        CipherState { k: Some([0; 32]), n: u64::MAX }
+    }
+}
+
 // ---- Section 5.2: SymmetricState ----
 
-#[derive(Clone)]
 struct SymmetricState {
     cipher_state: CipherState,
     ck: [u8; 32],
@@ -249,7 +260,12 @@ const IK: [&[Token]; 2] = [&[Token::E, Token::Es, Token::S, Token::Ss], &[Token:
 
 /// A finished handshake's ciphers for one side: Split's c1 is the
 /// initiator's sending cipher, c2 the responder's (section 5.3).
-#[derive(Clone)]
+///
+/// ```compile_fail
+/// fn copy(transport: &colibrii::wire::noise::Transport) -> colibrii::wire::noise::Transport {
+///     transport.clone()
+/// }
+/// ```
 pub struct Transport {
     pub send: CipherState,
     pub receive: CipherState,
@@ -257,7 +273,11 @@ pub struct Transport {
 
 // ---- Section 5.3: HandshakeState ----
 
-#[derive(Clone)]
+/// ```compile_fail
+/// fn copy(handshake: &colibrii::wire::noise::HandshakeState) -> colibrii::wire::noise::HandshakeState {
+///     handshake.clone()
+/// }
+/// ```
 pub struct HandshakeState {
     symmetric_state: SymmetricState,
     initiator: bool,
