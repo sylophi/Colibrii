@@ -332,6 +332,11 @@ impl Device {
         self.runtime.run(work(self.inner.clone()))
     }
 
+    #[cfg(test)]
+    pub(crate) fn inner(&self) -> &Arc<Inner> {
+        &self.inner
+    }
+
     pub async fn close(mut self) {
         self.closed = true;
         self.run(Inner::shut_down).await;

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -193,9 +193,21 @@ struct Live {
     conn: Arc<Conn>,
     pending: Mutex<HashMap<String, Pending>>,
     next_id: AtomicU64,
+    /// Set once the attempt ended, under the hub socket's `live` lock, which
+    /// every publication of its roster takes too.
+    ended: AtomicBool,
 }
 
 impl Live {
+    fn new(conn: Arc<Conn>) -> Live {
+        Live {
+            conn,
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(u64::from_le_bytes(crate::wire::random_bytes(8).try_into().unwrap()) >> 24),
+            ended: AtomicBool::new(false),
+        }
+    }
+
     fn fail(&self, which: impl Fn(&Pending) -> bool, error: DialError) {
         for (_, entry) in self.pending.lock().unwrap().extract_if(|_, entry| which(entry)) {
             let _ = entry.answered.send(Err(error.clone()));
@@ -300,14 +312,15 @@ struct AttemptEnd {
 
 impl Drop for AttemptEnd {
     fn drop(&mut self) {
-        self.ended.cancel();
         let mut live = self.hub.live.lock().unwrap();
+        self.live.ended.store(true, Ordering::SeqCst);
         if live.as_ref().is_some_and(|now| Arc::ptr_eq(now, &self.live)) {
             *live = None;
         }
-        drop(live);
-        self.live.fail(|_| true, DialError::NotConnected);
         self.hub.shared.roster.send_replace(None);
+        drop(live);
+        self.ended.cancel();
+        self.live.fail(|_| true, DialError::NotConnected);
     }
 }
 
@@ -372,11 +385,7 @@ impl HubSocket {
             Ok(Err(error)) => return failed(error.retry_after_seconds.map_or(Duration::ZERO, Duration::from_secs_f64)),
             Ok(Ok(conn)) => Arc::new(conn),
         };
-        let current = Arc::new(Live {
-            conn: conn.clone(),
-            pending: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(u64::from_le_bytes(crate::wire::random_bytes(8).try_into().unwrap()) >> 24),
-        });
+        let current = Arc::new(Live::new(conn.clone()));
         let ended = CancellationToken::new();
         let _end = AttemptEnd { hub: self.clone(), live: current.clone(), ended: ended.clone() };
         let heard = Arc::new(Heard::new());
@@ -403,10 +412,10 @@ impl HubSocket {
         if let Some(code) = first {
             return stop_of(code).map_or(failed(Duration::ZERO), Err);
         }
-        let shared = self.shared.clone();
+        let (hub, settling) = (self.clone(), current.clone());
         spawn_until(&self.shared.tasks, &ended, async move {
             sleep(SETTLE).await;
-            shared.roster.send_modify(|now| {
+            hub.publish(&settling, |now| {
                 if let Some(now) = now {
                     now.settled = true;
                 }
@@ -442,12 +451,13 @@ impl HubSocket {
                 let peers = roster_of(&online, &self.identity.device_id);
                 current.fail(|entry| !peers.iter().any(|peer| peer.device_id == entry.device_id), DialError::Offline);
                 // Asks go out on it from the first presence, which admits it.
-                *self.live.lock().unwrap() = Some(current.clone());
-                self.shared.roster.send_modify(|before| {
+                let published = self.publish(current, |before| {
                     let settled = before.as_ref().is_some_and(|then| then.settled);
                     *before = Some(Roster { peers, settled });
                 });
-                admitted.send_replace(true);
+                if published {
+                    admitted.send_replace(true);
+                }
             }
             ServiceMessage::Nack { to, reason } => {
                 let error = if reason == "offline" {
@@ -469,6 +479,18 @@ impl HubSocket {
                 }
             }
         }
+    }
+
+    /// Changes the roster as `current` says, and makes it the socket asks
+    /// go out on, unless its attempt ended: false then.
+    fn publish(&self, current: &Arc<Live>, change: impl FnOnce(&mut Option<Roster>)) -> bool {
+        let mut live = self.live.lock().unwrap();
+        if current.ended.load(Ordering::SeqCst) {
+            return false;
+        }
+        *live = Some(current.clone());
+        self.shared.roster.send_modify(change);
+        true
     }
 
     async fn answer_ask(&self, conn: &Conn, from: String, frame: RelayFrame) {
@@ -546,6 +568,38 @@ fn read_answer(current: &Live, from: &str, frame: &RelayFrame) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fakes;
+    use crate::wire::relay::Answer;
+
+    fn answer_nothing() -> AnswerFn {
+        Arc::new(|_, _| Box::pin(async { Answer::Refused("unknown-ask".into()) }))
+    }
+
+    /// A hub socket of `device`'s, and an attempt of its whose socket is up.
+    async fn attempt_of(device: &crate::Device) -> (Arc<HubSocket>, Arc<Live>) {
+        let inner = device.inner().clone();
+        let identity =
+            Arc::new(Identity { device_id: fakes::ids().0, credential: "credential".into(), key: KeyPair::generate() });
+        let hub = HubSocket::new(inner.clone(), Shared::new(), identity, answer_nothing());
+        let (conn, _) = fakes::conn(&inner.tasks).await;
+        let live = Arc::new(Live::new(Arc::new(conn)));
+        (hub, live)
+    }
+
+    #[tokio::test]
+    async fn a_presence_read_after_its_socket_closed_publishes_nothing() {
+        let device = fakes::device().await;
+        let (hub, live) = attempt_of(&device).await;
+        let (ended, admitted) = (CancellationToken::new(), watch::channel(false).0);
+        let presence = fakes::presence(&[(&fakes::ids().0, KeyPair::generate().public_key)]);
+        hub.handle(&live, &ended, &admitted, &presence);
+        assert!(hub.shared.roster().is_some());
+        drop(AttemptEnd { hub: hub.clone(), live: live.clone(), ended: ended.clone() });
+        // One the reader had taken before the end.
+        hub.handle(&live, &ended, &admitted, &presence);
+        assert!(hub.shared.roster().is_none());
+        assert!(hub.live.lock().unwrap().is_none());
+    }
 
     fn after(uptime: u64, wait_at_least: u64) -> Run {
         Run { uptime: Duration::from_secs(uptime), wait_at_least: Duration::from_secs(wait_at_least) }

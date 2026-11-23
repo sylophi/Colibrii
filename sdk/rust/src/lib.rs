@@ -7,6 +7,8 @@ mod conn;
 mod device;
 mod dial;
 mod errors;
+#[cfg(test)]
+mod fakes;
 mod hub_api;
 mod hub_socket;
 mod link;
