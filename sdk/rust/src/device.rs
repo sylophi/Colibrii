@@ -205,6 +205,10 @@ pub(crate) struct Inner {
 /// its hub socket up, follows which of the person's other devices are
 /// online, and opens end-to-end encrypted links to them. Dropping it closes
 /// it, as [`Device::close`] does without waiting.
+///
+/// A call, once made, runs to its end even if what it returned is dropped,
+/// so the device and its store never part ways halfway. A dial is the one
+/// that stops.
 pub struct Device {
     inner: Arc<Inner>,
     runtime: Arc<Runtime>,
@@ -321,15 +325,13 @@ impl Device {
         Watch(self.inner.wakes.subscribe())
     }
 
-    /// Closes the hub socket, the listener, every link and the tunnel, and
-    /// waits until they are.
-    /// Runs `work` on the device's runtime.
+    /// Runs `work` on the device's runtime, to its end.
     fn run<F>(&self, work: impl FnOnce(Arc<Inner>) -> F) -> Task<F::Output>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.runtime.run(work(self.inner.clone()))
+        self.runtime.run_through(&self.inner.tasks, work(self.inner.clone()))
     }
 
     #[cfg(test)]
@@ -337,9 +339,11 @@ impl Device {
         &self.inner
     }
 
+    /// Closes the hub socket, the listener, every link and the tunnel, and
+    /// waits until they are.
     pub async fn close(mut self) {
         self.closed = true;
-        self.run(Inner::shut_down).await;
+        self.runtime.run(self.inner.clone().shut_down()).await;
         self.runtime.stop();
     }
 }
@@ -724,21 +728,118 @@ impl Inner {
             // The service let the device go: nothing to revoke.
             Some(Stored::Removed { .. }) => {
                 self.remove_stored().await?;
-                self.end().await;
-                self.state.lock().unwrap().enrollment = None;
-                self.account.send_replace(SIGNED_OUT);
+                self.forget().await;
                 return Ok(true);
             }
-            Some(Stored::Owed(owed)) => return self.deliver(&owed).await,
+            // Signed out by another run sharing the store.
+            Some(Stored::Owed(owed)) => {
+                self.forget().await;
+                return self.deliver(&owed).await;
+            }
             Some(Stored::Enrollment(current)) => current,
         };
         let owed = Owed { device_id: current.device_id, credential: current.credential };
         // The store first, so a write that fails leaves the device running
         // as it was.
         self.write_stored(Stored::Owed(owed.clone())).await?;
+        self.forget().await;
+        self.deliver(&owed).await
+    }
+
+    /// Ends what runs, and reads as signed out.
+    async fn forget(&self) {
         self.end().await;
         self.state.lock().unwrap().enrollment = None;
         self.account.send_replace(SIGNED_OUT);
-        self.deliver(&owed).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::mpsc as std_mpsc;
+    use std::time::Duration;
+
+    use tokio::time::{sleep, timeout};
+
+    use super::*;
+    use crate::store::MemoryStore;
+
+    /// A store whose next write waits for the test once it is handed a gate.
+    #[derive(Default)]
+    struct Gated {
+        held: MemoryStore,
+        gate: Mutex<Option<std_mpsc::Receiver<()>>>,
+    }
+
+    impl CredentialStore for Gated {
+        fn read(&self) -> io::Result<Option<String>> {
+            self.held.read()
+        }
+
+        fn write(&self, text: &str) -> io::Result<()> {
+            let gate = self.gate.lock().unwrap().take();
+            if let Some(gate) = gate {
+                let _ = gate.recv();
+            }
+            self.held.write(text)
+        }
+
+        fn remove(&self) -> io::Result<()> {
+            self.held.remove()
+        }
+    }
+
+    /// A device whose store holds an enrollment, with a hub that never
+    /// answers.
+    async fn enrolled(store: Arc<dyn CredentialStore>) -> (Device, Enrollment) {
+        let enrollment = Enrollment {
+            device_id: new_device_id(),
+            account_id: "account".into(),
+            credential: "credential".into(),
+            private_key: KeyPair::generate().private_key,
+            port: None,
+        };
+        store.write(&Stored::Enrollment(enrollment.clone()).encode()).unwrap();
+        let options = Options::new("http://127.0.0.1:1", "inkwell", Connections::Single, store)
+            .runtime(tokio::runtime::Handle::current());
+        (Device::new(options).await.unwrap(), enrollment)
+    }
+
+    fn running(device: &Device) -> bool {
+        device.inner.state.lock().unwrap().session.is_some()
+    }
+
+    #[tokio::test]
+    async fn a_sign_out_dropped_while_its_store_write_runs_still_signs_out() {
+        let store = Arc::new(Gated::default());
+        let (device, _) = enrolled(store.clone()).await;
+        let (open, gate) = std_mpsc::channel();
+        *store.gate.lock().unwrap() = Some(gate);
+        let writing = async {
+            while store.gate.lock().unwrap().is_some() {
+                sleep(Duration::from_millis(1)).await;
+            }
+        };
+        tokio::select! {
+            _ = device.sign_out() => panic!("the write is held"),
+            () = writing => {}
+        }
+        open.send(()).unwrap();
+        let mut account = device.account();
+        let signed_out = timeout(Duration::from_secs(5), account.wait_for(|state| *state == SIGNED_OUT));
+        assert!(signed_out.await.is_ok());
+        assert!(!running(&device));
+    }
+
+    #[tokio::test]
+    async fn a_sign_out_after_another_run_signed_out_ends_this_one() {
+        let store = Arc::new(MemoryStore::new());
+        let (device, enrollment) = enrolled(store.clone()).await;
+        let owed = Owed { device_id: enrollment.device_id, credential: enrollment.credential };
+        store.write(&Stored::Owed(owed).encode()).unwrap();
+        device.sign_out().await.unwrap();
+        assert_eq!(device.account().get(), SIGNED_OUT);
+        assert!(!running(&device));
     }
 }

@@ -43,7 +43,17 @@ impl Runtime {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        Task(self.handle.spawn(future))
+        Task { handle: self.handle.spawn(future), abort: true }
+    }
+
+    /// Runs `future` on the device's runtime as one of `tasks`, to its end
+    /// whether or not what this returns is still awaited.
+    pub fn run_through<F>(&self, tasks: &TaskTracker, future: F) -> Task<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        Task { handle: tasks.spawn_on(future, &self.handle), abort: false }
     }
 
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
@@ -81,14 +91,18 @@ pub(crate) fn spawn_until(
     });
 }
 
-/// A task on the device's runtime that stops when dropped.
-pub(crate) struct Task<T>(JoinHandle<T>);
+/// A task on the device's runtime, awaited from anywhere.
+pub(crate) struct Task<T> {
+    handle: JoinHandle<T>,
+    /// Whether dropping it stops it.
+    abort: bool,
+}
 
 impl<T> Future for Task<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        Pin::new(&mut self.0).poll(cx).map(|result| match result {
+        Pin::new(&mut self.handle).poll(cx).map(|result| match result {
             Ok(value) => value,
             Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
             // Only the runtime shutting down cancels a task that is awaited.
@@ -99,7 +113,9 @@ impl<T> Future for Task<T> {
 
 impl<T> Drop for Task<T> {
     fn drop(&mut self) {
-        self.0.abort();
+        if self.abort {
+            self.handle.abort();
+        }
     }
 }
 
