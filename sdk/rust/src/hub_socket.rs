@@ -245,7 +245,8 @@ struct Live {
     pending: Mutex<HashMap<String, Pending>>,
     next_id: AtomicU64,
     /// Set once the attempt ended, under the hub socket's `live` lock, which
-    /// every publication of its roster takes too.
+    /// every publication of its roster takes too, and before it fails the
+    /// asks pending.
     ended: AtomicBool,
 }
 
@@ -586,11 +587,14 @@ impl HubSocket {
             seal_ask(&identity.device_id, device_id, &identity.key, peer.public_key, &encode_ask(&input), None)
                 .map_err(|_| DialError::unreachable("the roster's key for the device is unusable"))?;
         let (answered, answer) = oneshot::channel();
-        current
-            .pending
-            .lock()
-            .unwrap()
-            .insert(id.clone(), Pending { device_id: device_id.to_owned(), handshake, answered });
+        {
+            let mut pending = current.pending.lock().unwrap();
+            // Its end failed every ask it held, and would not fail this one.
+            if current.ended.load(Ordering::SeqCst) {
+                return Err(DialError::NotConnected);
+            }
+            pending.insert(id.clone(), Pending { device_id: device_id.to_owned(), handshake, answered });
+        }
         let _asked = Asked { live: current.clone(), id: id.clone() };
         let frame = encode_relay_frame(&RelayFrame { kind: FrameKind::Ask, id, sealed });
         current.conn.send(Msg::Text(encode_relay(device_id, &frame)));
@@ -739,6 +743,30 @@ mod tests {
         let input = ConnectInfoInput { dialable_kinds: Vec::new(), connection_id: fakes::ids().1 };
         assert!(timeout(Duration::from_millis(20), attempt.hub.ask(&peer, input)).await.is_err());
         assert!(attempt.live.pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_ask_made_as_its_attempt_ends_fails_at_once() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let _entered = runtime.enter();
+        let device = runtime.block_on(fakes::device());
+        for _ in 0..2_000 {
+            let attempt = runtime.block_on(FakeAttempt::new(device.inner(), Shared::new()));
+            let peer = fakes::ids().0;
+            attempt.hear(&fakes::presence(&[(&peer, KeyPair::generate().public_key)]));
+            let together = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    together.wait();
+                    let (hub, live, ended) = (attempt.hub.clone(), attempt.live.clone(), attempt.ended.clone());
+                    drop(AttemptEnd { hub, live, ended });
+                });
+                let input = ConnectInfoInput { dialable_kinds: Vec::new(), connection_id: fakes::ids().1 };
+                together.wait();
+                let asked = runtime.block_on(timeout(Duration::from_secs(1), attempt.hub.ask(&peer, input)));
+                assert!(matches!(asked, Ok(Err(DialError::NotConnected))), "{asked:?}");
+            });
+        }
     }
 
     #[tokio::test]
