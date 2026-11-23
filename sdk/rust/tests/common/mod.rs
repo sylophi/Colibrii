@@ -1,6 +1,8 @@
 //! Devices in this process against the real service in workerd, which
-//! `harness/src/serve.ts` starts once for each test binary and stops once
-//! the binary exits and its stdin ends.
+//! `harness/src/serve.ts` starts once for each test binary. As the binary
+//! exits, the harness's stdin ends and the binary waits for it to stop,
+//! failing the run unless it stopped cleanly: it exits with an error once
+//! the service made a request leaving the machine.
 #![allow(dead_code)]
 
 use std::future::Future;
@@ -8,8 +10,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use colibrii::testing::{Hooks, Opened};
 use colibrii::wire::relay::CandidateKind;
@@ -25,12 +27,41 @@ pub fn repo_root() -> PathBuf {
 
 struct Service {
     url: String,
-    io: Mutex<(ChildStdin, BufReader<ChildStdout>)>,
-    _child: Child,
+    io: Mutex<Option<(ChildStdin, BufReader<ChildStdout>)>>,
+    child: Mutex<Child>,
+}
+
+static SERVICE: OnceLock<Service> = OnceLock::new();
+
+unsafe extern "C" {
+    fn atexit(run: extern "C" fn()) -> std::ffi::c_int;
+    fn _Exit(status: std::ffi::c_int) -> !;
+}
+
+extern "C" fn stop_service() {
+    let Some(service) = SERVICE.get() else { return };
+    drop(service.io.lock().unwrap_or_else(PoisonError::into_inner).take());
+    let mut child = service.child.lock().unwrap_or_else(PoisonError::into_inner);
+    let deadline = Instant::now() + WAIT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(Some(status)) => break Some(status),
+            _ => {
+                let _ = child.kill();
+                break None;
+            }
+        }
+    };
+    if !status.is_some_and(|status| status.success()) {
+        eprintln!("the harness did not stop cleanly: {status:?}");
+        // Exiting again from an exit handler is undefined, and `_Exit` does
+        // not run them.
+        unsafe { _Exit(1) };
+    }
 }
 
 fn service() -> &'static Service {
-    static SERVICE: OnceLock<Service> = OnceLock::new();
     SERVICE.get_or_init(|| {
         let mut child = Command::new("node")
             .arg("harness/src/serve.ts")
@@ -45,7 +76,9 @@ fn service() -> &'static Service {
         stdout.read_line(&mut line).unwrap();
         let first: Value = serde_json::from_str(&line).expect("the harness prints its address");
         let url = first["url"].as_str().unwrap().trim_end_matches('/').to_owned();
-        Service { url, io: Mutex::new((stdin, stdout)), _child: child }
+        // SAFETY: registers a function that takes nothing.
+        unsafe { atexit(stop_service) };
+        Service { url, io: Mutex::new(Some((stdin, stdout))), child: Mutex::new(child) }
     })
 }
 
@@ -56,6 +89,7 @@ pub fn hub() -> String {
 /// A login token as `harness/src/serve.ts` reads `ask`.
 pub fn token(ask: Value) -> String {
     let mut io = service().io.lock().unwrap();
+    let io = io.as_mut().unwrap();
     writeln!(io.0, "{ask}").unwrap();
     let mut line = String::new();
     io.1.read_line(&mut line).unwrap();
