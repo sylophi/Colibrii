@@ -266,16 +266,19 @@ fn stop_of(code: u16) -> Option<Stop> {
 fn connect_url(hub: &str, ticket: &str) -> String {
     let hub = hub.trim_end_matches('/');
     let hub = hub.strip_prefix("http").map_or_else(|| hub.to_owned(), |rest| format!("ws{rest}"));
-    let ticket: String = ticket
-        .bytes()
+    format!("{hub}/connect?ticket={}", percent_encode(ticket))
+}
+
+/// As JavaScript's `encodeURIComponent`.
+pub(crate) fn percent_encode(text: &str) -> String {
+    text.bytes()
         .map(|byte| match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
                 (byte as char).to_string()
             }
             _ => format!("%{byte:02X}"),
         })
-        .collect();
-    format!("{hub}/connect?ticket={ticket}")
+        .collect()
 }
 
 fn roster_of(online: &[crate::wire::hub::OnlineDevice], me: &str) -> Vec<Peer> {

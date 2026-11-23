@@ -53,7 +53,8 @@ pub fn hub() -> String {
     service().url.clone()
 }
 
-fn token(ask: Value) -> String {
+/// A login token as `harness/src/serve.ts` reads `ask`.
+pub fn token(ask: Value) -> String {
     let mut io = service().io.lock().unwrap();
     writeln!(io.0, "{ask}").unwrap();
     let mut line = String::new();
@@ -323,4 +324,62 @@ pub async fn next_link(links: &mut tokio::sync::mpsc::UnboundedReceiver<colibrii
 /// Until `device`'s roster names `peer`.
 pub async fn sees(device: &Device, peer: &str) {
     wait_for(&device.roster(), |peers| peers.iter().any(|entry| entry.device_id == peer)).await;
+}
+
+// ---- A stand-in for a service the SDK calls ----
+
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Request {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str())
+    }
+}
+
+/// A local HTTP server, at the origin this returns, answering each request
+/// with the status and body `answer` gives.
+pub async fn http_stub(answer: impl Fn(&Request) -> (u16, String) + Send + Sync + 'static) -> String {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let answer = Arc::new(answer);
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            let answer = answer.clone();
+            tokio::spawn(async move {
+                let mut socket = tokio::io::BufReader::new(socket);
+                let mut line = String::new();
+                socket.read_line(&mut line).await.unwrap_or(0);
+                let mut words = line.split_whitespace();
+                let (method, path) =
+                    (words.next().unwrap_or_default().to_owned(), words.next().unwrap_or_default().to_owned());
+                let mut headers = Vec::new();
+                loop {
+                    line.clear();
+                    if socket.read_line(&mut line).await.unwrap_or(0) <= 2 {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        headers.push((name.trim().to_owned(), value.trim().to_owned()));
+                    }
+                }
+                let mut request = Request { method, path, headers, body: Vec::new() };
+                let length = request.header("content-length").map_or(0, |length| length.parse().unwrap());
+                request.body = vec![0; length];
+                if socket.read_exact(&mut request.body).await.is_err() {
+                    return;
+                }
+                let (status, body) = answer(&request);
+                let reply =
+                    format!("HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let _ = socket.get_mut().write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    origin
 }

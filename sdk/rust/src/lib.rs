@@ -14,6 +14,7 @@ mod listener;
 mod liveness;
 mod runtime;
 mod session;
+mod sign_in;
 mod store;
 #[doc(hidden)]
 pub mod testing;
@@ -31,6 +32,7 @@ pub use errors::{
 pub use link::{Link, LinkCloseCause, LinkClosed, Role};
 pub use listener::{IncomingHello, Listen};
 pub use runtime::block_on;
+pub use sign_in::{CodeSignIn, CodeSignInError, SignInCode, sign_in_token};
 pub use store::{CredentialStore, FileStore, MemoryStore};
 pub use tunnel::{TunnelOptions, end_leftover_cloudflared};
 pub use watch::Watch;

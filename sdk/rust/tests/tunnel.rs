@@ -15,7 +15,6 @@ use colibrii::testing::{Hooks, Opened, Timings};
 use colibrii::wire::relay::CandidateKind;
 use colibrii::{Device, DialError, Listen, TunnelOptions, TunnelState};
 use common::*;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 const FAKE: &str = "#!/bin/sh\n[ \"$1\" = \"--version\" ] && exit 0\nwhile :; do sleep 1; done\n";
 const HOSTNAME: &str = "a1b2c3.tunnel.test";
@@ -33,53 +32,26 @@ struct Stub {
 }
 
 async fn stub() -> Stub {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
     let routing = Arc::new(AtomicU16::new(502));
     let provisioned = Arc::new(Mutex::new(Vec::new()));
     let (status, noted) = (routing.clone(), provisioned.clone());
-    tokio::spawn(async move {
-        while let Ok((socket, _)) = listener.accept().await {
-            let (status, noted) = (status.clone(), noted.clone());
-            tokio::spawn(async move {
-                let mut socket = BufReader::new(socket);
-                let mut head = Vec::new();
-                let mut line = String::new();
-                while socket.read_line(&mut line).await.unwrap_or(0) > 2 {
-                    head.push(std::mem::take(&mut line).trim_end().to_owned());
-                }
-                let header = |name: &str| {
-                    head.iter().find_map(|line| {
-                        let (key, value) = line.split_once(':')?;
-                        key.eq_ignore_ascii_case(name).then(|| value.trim().to_owned())
-                    })
-                };
-                let answer = if head.first().is_some_and(|line| line.starts_with("POST /tunnel ")) {
-                    let length = header("content-length").map_or(0, |length| length.parse().unwrap());
-                    let mut body = vec![0; length];
-                    socket.read_exact(&mut body).await.unwrap();
-                    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                    noted.lock().unwrap().push(Provisioned {
-                        port: body["port"].as_u64().unwrap() as u16,
-                        bearer: header("authorization").unwrap_or_default(),
-                    });
-                    let json = serde_json::json!({
-                        "hostname": HOSTNAME,
-                        "connectorToken": "connector-token-for-tests",
-                        "fresh": false,
-                    })
-                    .to_string();
-                    format!(
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{json}",
-                        json.len()
-                    )
-                } else {
-                    format!("HTTP/1.1 {} X\r\ncontent-length: 0\r\n\r\n", status.load(Ordering::SeqCst))
-                };
-                let _ = socket.get_mut().write_all(answer.as_bytes()).await;
-            });
+    let origin = http_stub(move |request| {
+        if request.method != "POST" || request.path != "/tunnel" {
+            return (status.load(Ordering::SeqCst), String::new());
         }
-    });
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        noted.lock().unwrap().push(Provisioned {
+            port: body["port"].as_u64().unwrap() as u16,
+            bearer: request.header("authorization").unwrap_or_default().to_owned(),
+        });
+        let answer = serde_json::json!({
+            "hostname": HOSTNAME,
+            "connectorToken": "connector-token-for-tests",
+            "fresh": false,
+        });
+        (200, answer.to_string())
+    })
+    .await;
     Stub { origin, routing, provisioned }
 }
 
