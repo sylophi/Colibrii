@@ -29,16 +29,31 @@ pub(crate) fn retry_after_of(header: Option<&str>) -> f64 {
         .unwrap_or(DEFAULT_RETRY_AFTER_SECONDS)
 }
 
-// The errors each route may answer, its own and those of its middleware:
-// the version floor on every route, and the credential's check on the
-// device routes.
-pub(crate) const ENROLL: &[&str] =
-    &["UpdateRequired", "LoginRejected", "UnknownApp", "DeviceEnrolledElsewhere", "AccountFull", "Unavailable"];
-pub(crate) const SIGN_IN_TOKEN: &[&str] =
-    &["UpdateRequired", "LoginRejected", "UnknownApp", "SignInTokensOff", "Unavailable"];
-pub(crate) const DEVICE: &[&str] = &["UpdateRequired", "CredentialRejected", "DeviceRevoked", "Unavailable"];
-pub(crate) const DEVICE_BY_ID: &[&str] =
-    &["UpdateRequired", "CredentialRejected", "DeviceRevoked", "Unavailable", "UnknownDevice"];
+/// How a route answers: the status it succeeds with, and the errors it
+/// may answer, its own and those of its middleware (the version floor on
+/// every route, and the credential's check on the device routes).
+#[derive(Clone, Copy)]
+pub(crate) struct Route {
+    succeeds: u16,
+    errors: &'static [&'static str],
+}
+
+pub(crate) const ENROLL: Route = Route {
+    succeeds: 200,
+    errors: &["UpdateRequired", "LoginRejected", "UnknownApp", "DeviceEnrolledElsewhere", "AccountFull", "Unavailable"],
+};
+pub(crate) const SIGN_IN_TOKEN: Route = Route {
+    succeeds: 200,
+    errors: &["UpdateRequired", "LoginRejected", "UnknownApp", "SignInTokensOff", "Unavailable"],
+};
+/// `GET /devices`, `POST /tickets` and `POST /tunnel`.
+pub(crate) const DEVICE: Route =
+    Route { succeeds: 200, errors: &["UpdateRequired", "CredentialRejected", "DeviceRevoked", "Unavailable"] };
+/// `PATCH` and `DELETE /devices/:deviceId`.
+pub(crate) const DEVICE_BY_ID: Route = Route {
+    succeeds: 204,
+    errors: &["UpdateRequired", "CredentialRejected", "DeviceRevoked", "Unavailable", "UnknownDevice"],
+};
 
 #[derive(Clone)]
 pub(crate) struct HubApi {
@@ -64,7 +79,7 @@ impl HubApi {
         path: &str,
         bearer: &str,
         body: Option<&(impl Serialize + Sync)>,
-        errors: &[&str],
+        route: Route,
     ) -> Result<Value, Error> {
         let url = format!("{}{path}", self.hub);
         let url = self.hooks.divert(method.as_str(), &url).unwrap_or(url);
@@ -97,11 +112,13 @@ impl HubApi {
         }
         let json = if bytes.is_empty() { Some(Value::Null) } else { serde_json::from_slice(&bytes).ok() };
         let unreadable = || Error::HubUnreachable(format!("an unreadable answer ({status})"));
-        if (200..300).contains(&status) {
+        if status == route.succeeds {
             return json.ok_or_else(unreadable);
         }
         match json.as_ref().and_then(ServiceError::decode) {
-            Some(error) if error.status() == status && errors.contains(&error.tag()) => Err(Error::Service(error)),
+            Some(error) if error.status() == status && route.errors.contains(&error.tag()) => {
+                Err(Error::Service(error))
+            }
             _ => Err(unreadable()),
         }
     }

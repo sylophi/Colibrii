@@ -58,6 +58,31 @@ pub async fn listened(
     (link, far)
 }
 
+/// A hub at the address this gives that answers every request with
+/// `status`, such as "202 Accepted", and no body.
+pub async fn hub_answering(status: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|end| end == b"\r\n\r\n") {
+                    match stream.read(&mut buffer).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => request.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let answer = format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                let _ = stream.write_all(answer.as_bytes()).await;
+            });
+        }
+    });
+    url
+}
+
 /// A presence naming each device with its key.
 pub fn presence(online: &[(&str, [u8; 32])]) -> String {
     let online: Vec<_> = online

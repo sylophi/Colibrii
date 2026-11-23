@@ -594,10 +594,10 @@ impl Inner {
         method: Method,
         path: String,
         body: Option<&(impl serde::Serialize + Sync)>,
-        errors: &[&str],
+        route: hub_api::Route,
     ) -> Result<Value, Error> {
         let Some(current) = self.state.lock().unwrap().enrollment.clone() else { return Err(Error::NotEnrolled) };
-        let answer = self.api.call(method, &path, &current.credential, body, errors).await;
+        let answer = self.api.call(method, &path, &current.credential, body, route).await;
         if let Err(error) = &answer
             && let Some(stop) = hub_api::stop_of_error(error)
         {
@@ -944,5 +944,18 @@ mod tests {
             let _ = done.send(());
         });
         assert!(finished.recv_timeout(Duration::from_secs(5)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_removal_answered_with_anything_but_its_204_stays_owed() {
+        let store = Arc::new(MemoryStore::new());
+        let owed = Owed { device_id: new_device_id(), credential: "credential".into() };
+        store.write(&Stored::Owed(owed.clone()).encode()).unwrap();
+        let hub = crate::fakes::hub_answering("202 Accepted").await;
+        let options =
+            Options::new(hub, "inkwell", Connections::Single, store.clone()).runtime(tokio::runtime::Handle::current());
+        let device = Device::new(options).await.unwrap();
+        assert!(!device.sign_out().await.unwrap());
+        assert_eq!(store.read().unwrap().as_deref().and_then(Stored::decode), Some(Stored::Owed(owed)));
     }
 }
