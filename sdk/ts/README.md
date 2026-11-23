@@ -47,11 +47,14 @@ Effect's unstable HTTP modules, so it names the exact version it was
 built with.
 
 ```sh
-pnpm add https://github.com/sylophi/Colibrii/releases/download/v0.1.1/colibrii-sdk-0.1.1.tgz effect@4.1.4
+pnpm add https://github.com/sylophi/Colibrii/releases/download/v<version>/colibrii-sdk-<version>.tgz effect@4.1.4
 ```
 
-In a checkout of this repository, `pnpm pack:sdk` builds the same
-tarball into `out/`.
+`<version>` is a release's, and
+[the latest](https://github.com/sylophi/Colibrii/releases/latest) shows
+the newest. A release's tag is the only place its version is written,
+so in a checkout of this repository `pnpm pack:sdk` builds the tarball
+into `out/` as version 0.0.0.
 
 ## Making a device
 

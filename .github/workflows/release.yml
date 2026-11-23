@@ -27,6 +27,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The tag is the only place a release's version is written.
+      - name: Take the SDK's version from the tag
+        working-directory: sdk/ts
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          jq --arg version "${TAG#v}" '.version = $version' package.json > package.next.json
+          mv package.next.json package.json
+
       - run: pnpm pack:sdk
 
       - name: Attach the SDK to the release

@@ -31,12 +31,17 @@ messages, each checked against the vectors in `spec/vectors/`.
 ## Installing
 
 The crate is on no registry. An app takes it from this repository as a
-git dependency, by the tag of a release:
+git dependency, by the tag of a release.
+[The latest](https://github.com/sylophi/Colibrii/releases/latest) shows
+the newest:
 
 ```toml
 [dependencies]
-colibrii = { git = "https://github.com/sylophi/Colibrii", tag = "v0.1.1" }
+colibrii = { git = "https://github.com/sylophi/Colibrii", tag = "v<version>" }
 ```
+
+The tag is the only place a release's version is written, so cargo
+lists the crate as 0.0.0 beside the tag.
 
 It speaks TLS through rustls, with the system's root certificates, and
 needs no OpenSSL.

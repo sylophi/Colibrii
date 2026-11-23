@@ -1,6 +1,6 @@
 {
   "name": "@colibrii/sdk",
-  "version": "0.1.1",
+  "version": "0.0.0",
   "description": "The device side of Colibrii, which connects a person's devices to each other for any app",
   "license": "MIT",
   "repository": {

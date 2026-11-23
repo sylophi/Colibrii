@@ -20,9 +20,10 @@
 - `service/` is the Worker. Its README says how an instance is set up.
 - `harness/` runs the service in workerd for the service's tests and
   the SDK's.
-- A release is a GitHub release tagged `v` plus the version both SDKs
-  carry (`sdk/ts/package.json`, `sdk/rust/Cargo.toml`). Publishing one
-  attaches the TypeScript SDK's tarball to it
+- A release is a GitHub release tagged `v` plus its version, and the
+  tag is the only place that version is written: no file in the
+  repository names it. Publishing one builds the TypeScript SDK's
+  tarball at that version and attaches it
   (`.github/workflows/release.yml`), which is what an app installs. A
   Rust app takes the crate by the tag.
 - Install with pnpm. Install scripts are off, and new releases wait 7
