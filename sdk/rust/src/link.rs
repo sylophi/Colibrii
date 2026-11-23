@@ -183,8 +183,11 @@ impl LiveLink {
         if !first {
             return;
         }
-        if cause != LinkCloseCause::Peer {
-            self.conn.close(code, cause.as_str());
+        match cause {
+            LinkCloseCause::Peer => {}
+            // What the app sent before its close still goes out.
+            LinkCloseCause::Closed => self.conn.close(code, cause.as_str()),
+            _ => self.conn.cut(code, cause.as_str()),
         }
         self.received.lock().unwrap().take();
         self.stop.cancel();

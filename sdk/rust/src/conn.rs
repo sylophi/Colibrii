@@ -6,9 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, watch};
+use tokio::time::{sleep, timeout};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
@@ -52,9 +54,37 @@ pub struct Close {
     pub reason: String,
 }
 
-enum Out {
-    Msg(Msg),
-    Close(u16, String),
+impl From<Msg> for Message {
+    fn from(message: Msg) -> Message {
+        match message {
+            Msg::Text(text) => Message::text(text),
+            Msg::Binary(bytes) => Message::binary(bytes),
+        }
+    }
+}
+
+/// A close this end asked for.
+#[derive(Clone)]
+struct Closing {
+    code: u16,
+    reason: String,
+    /// What was queued and not yet sent is dropped.
+    cut: bool,
+}
+
+/// Whether the socket is open, and the close this end asked for, which the
+/// driver acts on at once.
+struct Ends {
+    open: AtomicBool,
+    closing: watch::Sender<Option<Closing>>,
+}
+
+impl Ends {
+    fn close(&self, closing: Closing) {
+        if self.open.swap(false, Ordering::SeqCst) {
+            self.closing.send_replace(Some(closing));
+        }
+    }
 }
 
 /// What a test sees of a socket.
@@ -64,10 +94,10 @@ struct Spied {
 }
 
 pub(crate) struct Conn {
-    out: mpsc::UnboundedSender<Out>,
+    out: mpsc::UnboundedSender<Msg>,
     inbound: tokio::sync::Mutex<mpsc::UnboundedReceiver<Msg>>,
     closed: watch::Receiver<Option<Close>>,
-    open: Arc<AtomicBool>,
+    ends: Arc<Ends>,
     spied: Option<Arc<Spied>>,
 }
 
@@ -79,10 +109,10 @@ impl Conn {
         let (out, out_rx) = mpsc::unbounded_channel();
         let (inbound_tx, inbound) = mpsc::unbounded_channel();
         let (closed_tx, closed) = watch::channel(None);
-        let open = Arc::new(AtomicBool::new(true));
-        tasks.spawn(drive(ws, out_rx, inbound_tx, closed_tx, open.clone()));
+        let ends = Arc::new(Ends { open: AtomicBool::new(true), closing: watch::channel(None).0 });
+        tasks.spawn(drive(ws, out_rx, inbound_tx, closed_tx, ends.clone()));
         let spied = spy.then(|| Arc::new(Spied { sent: Mutex::new(Vec::new()), deaf: AtomicBool::new(false) }));
-        Conn { out, inbound: tokio::sync::Mutex::new(inbound), closed, open, spied }
+        Conn { out, inbound: tokio::sync::Mutex::new(inbound), closed, ends, spied }
     }
 
     /// A socket accepted by a listener, past its upgrade.
@@ -99,20 +129,25 @@ impl Conn {
             if let Some(spied) = &self.spied {
                 spied.sent.lock().unwrap().push(message.clone());
             }
-            let _ = self.out.send(Out::Msg(message));
+            let _ = self.out.send(message);
         }
     }
 
-    /// Closes the socket, unless it is closing already.
+    /// Closes the socket after what was sent before, unless it is closing
+    /// already. However the other end takes it, the socket is let go a
+    /// second after.
     pub fn close(&self, code: u16, reason: &str) {
-        if self.open.swap(false, Ordering::SeqCst) {
-            let _ = self.out.send(Out::Close(code, reason.to_owned()));
-        }
+        self.ends.close(Closing { code, reason: reason.to_owned(), cut: false });
+    }
+
+    /// Closes the socket as `close` does, dropping what is still queued.
+    pub fn cut(&self, code: u16, reason: &str) {
+        self.ends.close(Closing { code, reason: reason.to_owned(), cut: true });
     }
 
     /// False once the socket is closing, by either end.
     pub fn is_open(&self) -> bool {
-        self.open.load(Ordering::SeqCst)
+        self.ends.open.load(Ordering::SeqCst)
     }
 
     fn deaf(&self) -> bool {
@@ -147,77 +182,126 @@ impl Drop for Conn {
     }
 }
 
+type Sink<S> = SplitSink<WebSocketStream<S>, Message>;
+
+/// How reading the socket ended.
+enum Read {
+    Closed(Close),
+    TooBig,
+    Broken,
+}
+
+/// Reads until the socket's end, passing on each message while the socket
+/// is open.
+async fn read<S>(
+    stream: &mut SplitStream<WebSocketStream<S>>,
+    inbound: &mpsc::UnboundedSender<Msg>,
+    ends: &Ends,
+) -> Read
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    loop {
+        let message = match stream.next().await {
+            Some(Ok(Message::Text(text))) => Msg::Text(text.to_string()),
+            Some(Ok(Message::Binary(bytes))) => Msg::Binary(bytes.to_vec()),
+            Some(Ok(Message::Close(frame))) => {
+                return Read::Closed(frame.map_or(Close { code: 1005, reason: String::new() }, |frame| Close {
+                    code: u16::from(frame.code),
+                    reason: frame.reason.to_string(),
+                }));
+            }
+            Some(Ok(_)) => continue,
+            Some(Err(WsError::Capacity(_))) => return Read::TooBig,
+            Some(Err(_)) | None => return Read::Broken,
+        };
+        if ends.open.load(Ordering::SeqCst) {
+            let _ = inbound.send(message);
+        }
+    }
+}
+
+/// Sends what is queued until this end asks to close, then the close
+/// frame. None once the connection broke.
+async fn write<S>(
+    sink: &mut Sink<S>,
+    out: &mut mpsc::UnboundedReceiver<Msg>,
+    mut closing: watch::Receiver<Option<Closing>>,
+) -> Option<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    loop {
+        let message = tokio::select! {
+            biased;
+            _ = closing.wait_for(Option::is_some) => break,
+            message = out.recv() => message,
+        };
+        let Some(message) = message else { break };
+        sink.send(message.into()).await.ok()?;
+    }
+    let Closing { code, reason, cut } =
+        closing.borrow().clone().unwrap_or(Closing { code: 1000, reason: "closed".into(), cut: false });
+    while let Some(message) = out.try_recv().ok().filter(|_| !cut) {
+        sink.send(message.into()).await.ok()?;
+    }
+    let frame = CloseFrame { code: CloseCode::from(code), reason: reason.into() };
+    sink.send(Message::Close(Some(frame))).await.ok()
+}
+
 async fn drive<S>(
     ws: WebSocketStream<S>,
-    mut out: mpsc::UnboundedReceiver<Out>,
+    mut out: mpsc::UnboundedReceiver<Msg>,
     inbound: mpsc::UnboundedSender<Msg>,
     closed: watch::Sender<Option<Close>>,
-    open: Arc<AtomicBool>,
+    ends: Arc<Ends>,
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (mut sink, mut stream) = ws.split();
-    let close = loop {
-        tokio::select! {
-            biased;
-            command = out.recv() => {
-                let (code, reason) = match command {
-                    Some(Out::Msg(message)) => {
-                        let message = match message {
-                            Msg::Text(text) => Message::text(text),
-                            Msg::Binary(bytes) => Message::binary(bytes),
-                        };
-                        if sink.send(message).await.is_err() { break abnormal(&open) }
-                        continue;
-                    }
-                    Some(Out::Close(code, reason)) => (code, reason),
-                    None => (1000, "closed".to_owned()),
-                };
-                open.store(false, Ordering::SeqCst);
-                let frame = CloseFrame { code: CloseCode::from(code), reason: reason.clone().into() };
-                let _ = tokio::time::timeout(CLOSE_GRACE, async {
-                    if sink.send(Message::Close(Some(frame))).await.is_ok() {
-                        // Until the other end's close, or its connection ends.
-                        while let Some(Ok(message)) = stream.next().await {
-                            if message.is_close() { break }
-                        }
-                    }
-                }).await;
-                break Close { code, reason };
+    let mut closing = ends.closing.subscribe();
+    let read = {
+        let reading = read(&mut stream, &inbound, &ends);
+        let writing = write(&mut sink, &mut out, closing.clone());
+        // From the moment this end asks to close, whatever is still being
+        // written.
+        let deadline = async {
+            let _ = closing.wait_for(Option::is_some).await;
+            sleep(CLOSE_GRACE).await;
+        };
+        tokio::pin!(reading, writing, deadline);
+        let mut written = false;
+        loop {
+            tokio::select! {
+                read = &mut reading => break read,
+                sent = &mut writing, if !written => match sent {
+                    Some(()) => written = true,
+                    None => break Read::Broken,
+                },
+                () = &mut deadline => break Read::Broken,
             }
-            frame = stream.next() => match frame {
-                Some(Ok(Message::Text(text))) => { let _ = inbound.send(Msg::Text(text.to_string())); }
-                Some(Ok(Message::Binary(bytes))) => { let _ = inbound.send(Msg::Binary(bytes.to_vec())); }
-                Some(Ok(Message::Close(frame))) => {
-                    open.store(false, Ordering::SeqCst);
-                    // The close frame is the close: the reply goes out
-                    // after, as the connection is let go.
-                    let close = frame.map_or(Close { code: 1005, reason: String::new() }, |frame| Close {
-                        code: u16::from(frame.code),
-                        reason: frame.reason.to_string(),
-                    });
-                    let _ = closed.send(Some(close));
-                    drop(inbound);
-                    let _ = tokio::time::timeout(CLOSE_GRACE, sink.close()).await;
-                    return;
-                }
-                Some(Ok(_)) => {}
-                Some(Err(WsError::Capacity(_))) => {
-                    open.store(false, Ordering::SeqCst);
-                    let frame = CloseFrame { code: CloseCode::Size, reason: "too big".into() };
-                    let _ = tokio::time::timeout(CLOSE_GRACE, sink.send(Message::Close(Some(frame)))).await;
-                    break Close { code: 1009, reason: "too big".into() };
-                }
-                Some(Err(_)) | None => break abnormal(&open),
-            },
         }
     };
+    ends.open.store(false, Ordering::SeqCst);
+    let ours = closing.borrow().clone().map(|Closing { code, reason, .. }| Close { code, reason });
+    let close = match (ours, read) {
+        (Some(ours), _) => ours,
+        (None, Read::Closed(theirs)) => {
+            // Their close frame is the close: the reply goes out after, as
+            // the connection is let go.
+            let _ = closed.send(Some(theirs));
+            drop(inbound);
+            let _ = timeout(CLOSE_GRACE, sink.close()).await;
+            return;
+        }
+        (None, Read::TooBig) => {
+            let frame = CloseFrame { code: CloseCode::Size, reason: "too big".into() };
+            let _ = timeout(CLOSE_GRACE, sink.send(Message::Close(Some(frame)))).await;
+            Close { code: 1009, reason: "too big".into() }
+        }
+        (None, Read::Broken) => Close { code: CLOSE_ABNORMAL, reason: String::new() },
+    };
     let _ = closed.send(Some(close));
-}
-
-fn abnormal(open: &AtomicBool) -> Close {
-    open.store(false, Ordering::SeqCst);
-    Close { code: CLOSE_ABNORMAL, reason: String::new() }
 }
 
 /// Why a socket did not open.
@@ -273,9 +357,9 @@ pub(crate) async fn open(
 pub struct Opened {
     pub url: String,
     spied: Arc<Spied>,
-    out: mpsc::UnboundedSender<Out>,
+    out: mpsc::UnboundedSender<Msg>,
     closed: watch::Receiver<Option<Close>>,
-    open: Arc<AtomicBool>,
+    ends: Arc<Ends>,
 }
 
 impl Opened {
@@ -285,7 +369,7 @@ impl Opened {
             spied: conn.spied.clone().expect("a socket a device opened is spied on"),
             out: conn.out.clone(),
             closed: conn.closed.clone(),
-            open: conn.open.clone(),
+            ends: conn.ends.clone(),
         }
     }
 
@@ -301,17 +385,72 @@ impl Opened {
 
     /// Sends as the device, without the device knowing.
     pub fn send(&self, message: Msg) {
-        let _ = self.out.send(Out::Msg(message));
+        let _ = self.out.send(message);
     }
 
     pub fn close(&self, code: u16, reason: &str) {
-        if self.open.swap(false, Ordering::SeqCst) {
-            let _ = self.out.send(Out::Close(code, reason.to_owned()));
-        }
+        self.ends.close(Closing { code, reason: reason.to_owned(), cut: false });
     }
 
     pub async fn closed(&self) -> Close {
         let mut closed = self.closed.clone();
         closed.wait_for(Option::is_some).await.ok().and_then(|close| close.clone()).expect("a close")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fakes;
+
+    const PIECE: usize = 64 * 1024;
+
+    /// A socket that queued far more than its far end has read.
+    async fn backed_up() -> (Conn, WebSocketStream<tokio::io::DuplexStream>, TaskTracker) {
+        let tasks = TaskTracker::new();
+        let (conn, far) = fakes::conn(&tasks).await;
+        for _ in 0..64 {
+            conn.send(Msg::Binary(vec![0; PIECE]));
+        }
+        tokio::task::yield_now().await;
+        (conn, far, tasks)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_close_lets_go_of_a_peer_that_stopped_reading_a_second_after() {
+        let (conn, _far, tasks) = backed_up().await;
+        conn.close(1000, "closed");
+        let started = tokio::time::Instant::now();
+        tasks.close();
+        assert!(timeout(Duration::from_secs(5), tasks.wait()).await.is_ok());
+        assert_eq!(started.elapsed(), CLOSE_GRACE);
+        assert_eq!(conn.closed().await, Close { code: 1000, reason: "closed".into() });
+    }
+
+    #[tokio::test]
+    async fn a_cut_drops_what_was_queued() {
+        let (conn, mut far, _tasks) = backed_up().await;
+        conn.cut(4001, "gone");
+        let mut pieces = 0;
+        let close = loop {
+            match far.next().await.unwrap().unwrap() {
+                Message::Binary(_) => pieces += 1,
+                Message::Close(frame) => break frame.unwrap(),
+                _ => {}
+            }
+        };
+        assert!(pieces < 4, "{pieces} pieces after the cut");
+        assert_eq!((u16::from(close.code), close.reason.as_str()), (4001, "gone"));
+    }
+
+    #[tokio::test]
+    async fn a_close_sends_what_was_queued_first() {
+        let (conn, mut far, _tasks) = backed_up().await;
+        conn.close(1000, "done");
+        let mut pieces = 0;
+        while let Message::Binary(_) = far.next().await.unwrap().unwrap() {
+            pieces += 1;
+        }
+        assert_eq!(pieces, 64);
     }
 }
