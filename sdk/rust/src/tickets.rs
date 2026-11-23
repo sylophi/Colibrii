@@ -13,11 +13,10 @@ use crate::wire::relay::CandidateKind;
 
 #[derive(Clone)]
 struct Ticket {
-    device_id: String,
-    connection_id: String,
+    /// The device and connection id it was minted for.
+    set: (String, String),
     kind: CandidateKind,
     expires_at: u64,
-    set: (String, String),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,13 +77,7 @@ impl LinkTickets {
             .iter()
             .map(|kind| {
                 let ticket = make_link_ticket();
-                let entry = Ticket {
-                    device_id: device_id.to_owned(),
-                    connection_id: connection_id.to_owned(),
-                    kind: *kind,
-                    expires_at: now + TICKET_TTL_MS,
-                    set: set.clone(),
-                };
+                let entry = Ticket { set: set.clone(), kind: *kind, expires_at: now + TICKET_TTL_MS };
                 self.pending.insert(ticket.clone(), entry);
                 ticket
             })
@@ -98,9 +91,7 @@ impl LinkTickets {
             None if self.retired_set.contains(ticket) => Check::Stale,
             None => Check::Unknown,
             Some(entry) if entry.kind != kind || entry.expires_at <= now => Check::Stale,
-            Some(entry) => {
-                Check::Pending { device_id: entry.device_id.clone(), connection_id: entry.connection_id.clone() }
-            }
+            Some(entry) => Check::Pending { device_id: entry.set.0.clone(), connection_id: entry.set.1.clone() },
         }
     }
 
