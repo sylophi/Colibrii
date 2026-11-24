@@ -1,3 +1,5 @@
+<img src="assets/icon.svg" width="128" alt="Colibrii's icon">
+
 # Colibrii
 
 Colibrii connects a person's devices to each other, for any app. It
