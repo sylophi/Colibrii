@@ -2,10 +2,16 @@
 
 # Colibrii
 
-Colibrii connects a person's devices to each other, for any app. It
-introduces two of the person's devices, sets up an encrypted connection
-between them, and gets out of the way: the app's data goes from device
-to device, and Colibrii never reads it.
+Encrypted links between a user's devices for your app.
+
+Colibrii is a service and an SDK. The devices a person signs in on find
+each other and talk, encrypted from end to end, and Colibrii never
+reads what the app sends.
+
+On the same network they connect directly. From anywhere else they
+connect through a Cloudflare Tunnel that Colibrii sets up and runs for
+each device, so the app gets tunnels with nothing for the person to
+configure. Only the person's own devices get through.
 
 It has two halves:
 
