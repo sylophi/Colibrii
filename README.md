@@ -2,7 +2,7 @@
 
 # Colibrii
 
-Encrypted links between a user's devices, for your app.
+Encrypted links between a user's devices for your app.
 
 Colibrii is a service and an SDK. The devices a person signs in on find
 each other and talk, encrypted from end to end, and Colibrii never
