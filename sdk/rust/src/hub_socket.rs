@@ -579,8 +579,13 @@ impl HubSocket {
     /// The asker's side: the peer's connectInfo result, or why there is
     /// none.
     pub async fn ask(&self, device_id: &str, input: ConnectInfoInput) -> Result<ConnectInfoResult, DialError> {
-        let current = self.live.lock().unwrap().clone().ok_or(DialError::NotConnected)?;
-        let peer = self.shared.peer(device_id).ok_or(DialError::Offline)?;
+        // Read under the `live` lock, so the socket's end, which clears the
+        // roster, is never taken for the peer's leaving.
+        let (current, peer) = {
+            let live = self.live.lock().unwrap();
+            let current = live.clone().ok_or(DialError::NotConnected)?;
+            (current, self.shared.peer(device_id).ok_or(DialError::Offline)?)
+        };
         let id = current.next_id.fetch_add(1, Ordering::SeqCst).to_string();
         let identity = &self.identity;
         let (sealed, handshake) =
